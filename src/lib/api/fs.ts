@@ -48,3 +48,8 @@ export function writeTextFile(path: string, contents: string): Promise<void> {
 export function readBinaryPreview(path: string): Promise<number[]> {
   return invoke<number[]>("read_binary_preview", { path });
 }
+
+/** Flat, gitignore-aware file index for Quick Open. */
+export function listWorkspaceFiles(root: string): Promise<string[]> {
+  return invoke<string[]>("list_workspace_files", { root });
+}

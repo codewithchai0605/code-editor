@@ -19,9 +19,10 @@ import {
   foldKeymap,
   syntaxHighlighting,
 } from "@codemirror/language";
-import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
+import { searchKeymap, highlightSelectionMatches, openSearchPanel } from "@codemirror/search";
 import { closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap } from "@codemirror/autocomplete";
 import { editorTheme, highlightStyle } from "./theme";
+import { searchExtension } from "./search";
 
 /**
  * This deliberately mirrors CodeMirror's own `basicSetup` ingredient list
@@ -50,6 +51,7 @@ export function baseExtensions(onSave: () => void): Extension[] {
     crosshairCursor(),
     highlightActiveLine(),
     highlightSelectionMatches(),
+    searchExtension(),
     editorTheme,
     keymap.of([
       {
@@ -60,9 +62,10 @@ export function baseExtensions(onSave: () => void): Extension[] {
           return true;
         },
       },
+      { key: "Mod-f", run: openSearchPanel },
       ...closeBracketsKeymap,
       ...defaultKeymap,
-      ...searchKeymap,
+      ...searchKeymap.filter((b) => b.key !== "Mod-f"),
       ...historyKeymap,
       ...foldKeymap,
       ...completionKeymap,

@@ -20,8 +20,8 @@
       <h1>Code Editor</h1>
       <p>Open a folder, then click a file to start editing.</p>
       <ul class="hints">
-        <li><kbd>Ctrl</kbd>+<kbd>P</kbd> Quick Open <span class="soon">soon</span></li>
-        <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> Command Palette <span class="soon">soon</span></li>
+        <li><kbd>Ctrl</kbd>+<kbd>P</kbd> Quick Open</li>
+        <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> Command Palette</li>
         <li><kbd>Ctrl</kbd>+<kbd>`</kbd> Toggle Terminal <span class="soon">soon</span></li>
         <li><kbd>Ctrl</kbd>+<kbd>S</kbd> Save</li>
         <li><kbd>Ctrl</kbd>+<kbd>B</kbd> Toggle Sidebar</li>

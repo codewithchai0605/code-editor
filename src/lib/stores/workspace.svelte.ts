@@ -1,4 +1,5 @@
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   openWorkspace,
   readDir,
@@ -69,6 +70,17 @@ class WorkspaceState {
   }
 
   // --- open / refresh ----------------------------------------------------
+
+  /** Shows the native folder picker and opens whatever the user chose.
+   *  Shared by FileTree's buttons and the Command Palette's "Open Folder"
+   *  command, so there's exactly one place that knows how to invoke the
+   *  dialog. */
+  async pickAndOpenFolder(): Promise<void> {
+    const selected = await openDialog({ directory: true, multiple: false });
+    if (typeof selected === "string") {
+      await this.open(selected);
+    }
+  }
 
   async open(path: string): Promise<void> {
     try {

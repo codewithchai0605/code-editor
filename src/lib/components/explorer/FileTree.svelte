@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount, setContext } from "svelte";
-  import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { listen } from "@tauri-apps/api/event";
   import type { FsEntry } from "$lib/types/fs";
@@ -21,13 +20,6 @@
   );
 
   let contextMenu = $state<{ entry: FsEntry; x: number; y: number } | null>(null);
-
-  async function pickFolder() {
-    const selected = await openDialog({ directory: true, multiple: false });
-    if (typeof selected === "string") {
-      await workspace.open(selected);
-    }
-  }
 
   function buildMenuItems(entry: FsEntry): MenuItem[] {
     const hasClipboard = workspace.clipboard !== null;
@@ -168,7 +160,7 @@
   {#if !workspace.rootPath}
     <div class="empty-state">
       <p>No folder opened yet.</p>
-      <button class="open-btn" onclick={pickFolder}>Open Folder</button>
+      <button class="open-btn" onclick={() => workspace.pickAndOpenFolder()}>Open Folder</button>
     </div>
   {:else}
     <div class="toolbar">
@@ -183,7 +175,7 @@
         <button title="Refresh" aria-label="Refresh" onclick={() => workspace.rootPath && workspace.refresh(workspace.rootPath)}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 11a8 8 0 1 0-2.5 6.5" /><path d="M20 5v6h-6" /></svg>
         </button>
-        <button title="Open Different Folder" aria-label="Open Different Folder" onclick={pickFolder}>
+        <button title="Open Different Folder" aria-label="Open Different Folder" onclick={() => workspace.pickAndOpenFolder()}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 5a1 1 0 0 1 1-1h4.5l2 2H19a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5z" /></svg>
         </button>
       </div>

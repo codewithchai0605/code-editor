@@ -2,22 +2,28 @@
   import { onMount } from "svelte";
   import { layout } from "$lib/stores/layout.svelte";
   import { editorStore } from "$lib/stores/editor.svelte";
+  import { workspace } from "$lib/stores/workspace.svelte";
+  import { paletteState } from "$lib/stores/palette.svelte";
+  import { registerCoreCommands } from "$lib/commands/coreCommands";
   import ActivityBar from "./ActivityBar.svelte";
   import Sidebar from "./Sidebar.svelte";
   import EditorArea from "./EditorArea.svelte";
   import Panel from "./Panel.svelte";
   import StatusBar from "./StatusBar.svelte";
   import ResizeHandle from "./ResizeHandle.svelte";
+  import PaletteHost from "./PaletteHost.svelte";
 
   onMount(() => {
+    const unregisterCommands = registerCoreCommands();
+
     const updateSize = () => layout.setWindowSize(window.innerWidth, window.innerHeight);
     updateSize();
     window.addEventListener("resize", updateSize);
 
-    // Base keybindings. A real command registry (so both core commands and
-    // extension-contributed commands share one keybinding dispatch table)
-    // arrives with the Command Palette phase — this is intentionally just
-    // enough to make the shell feel usable today.
+    // Base keybindings. Several of these are also registered as commands
+    // (see coreCommands.ts) purely for Command Palette discoverability —
+    // this is still what actually binds the key. See the note at the top
+    // of coreCommands.ts for why those two aren't more deeply unified yet.
     function onKeydown(e: KeyboardEvent) {
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
@@ -30,11 +36,18 @@
       } else if (e.key.toLowerCase() === "s") {
         e.preventDefault();
         editorStore.save();
+      } else if (e.key.toLowerCase() === "p" && e.shiftKey) {
+        e.preventDefault();
+        paletteState.toggle("commandPalette");
+      } else if (e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        if (workspace.rootPath) paletteState.toggle("quickOpen");
       }
     }
     window.addEventListener("keydown", onKeydown);
 
     return () => {
+      unregisterCommands();
       window.removeEventListener("resize", updateSize);
       window.removeEventListener("keydown", onKeydown);
     };
@@ -61,6 +74,8 @@
 
   <StatusBar />
 </div>
+
+<PaletteHost />
 
 <style>
   .shell {

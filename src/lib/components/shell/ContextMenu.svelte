@@ -96,7 +96,7 @@
   }
   .separator {
     height: 1px;
-    margin: 4px 6px;
+    margin: 4px 2px;
     background: var(--color-border);
   }
 </style>
