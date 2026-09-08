@@ -14,9 +14,13 @@
   onMount(() => {
     if (container && tab.cmState) {
       view = new EditorView({ state: tab.cmState, parent: container });
+      editorStore.registerActiveView(view);
       view.focus();
     }
-    return () => view?.destroy();
+    return () => {
+      editorStore.registerActiveView(null);
+      view?.destroy();
+    };
   });
 
   // Runs whenever `tab` changes — including switching between two text

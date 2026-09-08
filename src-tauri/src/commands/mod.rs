@@ -1,5 +1,4 @@
 // Each phase of the build adds a sibling module here, e.g.:
-//   pub mod pty;      // integrated terminal sessions
 //   pub mod lsp;      // language server process management + JSON-RPC bridge
 //   pub mod plugins;  // native extension host
 //
@@ -9,3 +8,4 @@
 
 pub mod app;
 pub mod fs;
+pub mod pty;

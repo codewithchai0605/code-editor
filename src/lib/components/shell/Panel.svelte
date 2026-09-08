@@ -1,13 +1,87 @@
 <script lang="ts">
+  import type { Component } from "svelte";
   import { layout } from "$lib/stores/layout.svelte";
+  import { workspace } from "$lib/stores/workspace.svelte";
+  import { terminalStore } from "$lib/stores/terminal.svelte";
+
+  // xterm.js is a substantial library that most sessions may never need
+  // (the panel starts closed) — deferring the import until the panel is
+  // actually opened keeps it out of the main bundle entirely.
+  let TerminalView = $state<Component<{ id: string; active: boolean }> | null>(null);
+
+  let creatingFirst = false;
+  $effect(() => {
+    if (!layout.panelOpen) return;
+
+    if (!TerminalView) {
+      import("$lib/components/terminal/TerminalView.svelte").then((mod) => {
+        TerminalView = mod.default;
+      });
+    }
+
+    // Lazily create the first terminal session the first time the panel
+    // opens. `creatingFirst` guards against a rapid open/close/open of the
+    // panel firing this twice before the first createSession() resolves.
+    if (terminalStore.sessions.length === 0 && !creatingFirst) {
+      creatingFirst = true;
+      terminalStore.createSession(workspace.rootPath ?? undefined).finally(() => {
+        creatingFirst = false;
+      });
+    }
+  });
 </script>
 
 <section class="panel" style:height="{layout.panelHeight}px">
   <header class="panel-header">
-    <span class="panel-tab active">Terminal</span>
+    <div class="tabs" role="tablist" aria-label="Terminal sessions">
+      {#each terminalStore.sessions as session (session.id)}
+        <div
+          class="tab"
+          class:active={session.id === terminalStore.activeId}
+          role="tab"
+          aria-selected={session.id === terminalStore.activeId}
+          tabindex="0"
+          onclick={() => terminalStore.setActive(session.id)}
+          onkeydown={(e) => e.key === "Enter" && terminalStore.setActive(session.id)}
+        >
+          <span class="name" class:exited={session.exited}>{session.title}</span>
+          <button
+            class="close"
+            aria-label="Close {session.title}"
+            onclick={(e) => {
+              e.stopPropagation();
+              terminalStore.closeSession(session.id);
+            }}
+          >
+            &times;
+          </button>
+        </div>
+      {/each}
+    </div>
+    <button
+      class="new-terminal"
+      aria-label="New Terminal"
+      onclick={() => terminalStore.createSession(workspace.rootPath ?? undefined)}
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+    </button>
   </header>
+
   <div class="panel-content">
-    <p class="placeholder">The integrated terminal (PTY + xterm.js) lands in a later phase.</p>
+    {#if TerminalView}
+      {#each terminalStore.sessions as session (session.id)}
+        <div class="terminal-slot" class:hidden={session.id !== terminalStore.activeId}>
+          <TerminalView id={session.id} active={session.id === terminalStore.activeId} />
+        </div>
+      {/each}
+    {:else if terminalStore.sessions.length > 0}
+      <p class="placeholder">Loading terminal&hellip;</p>
+    {/if}
+    {#if terminalStore.sessions.length === 0}
+      <p class="placeholder">No terminal sessions.</p>
+    {/if}
   </div>
 </section>
 
@@ -26,29 +100,83 @@
     height: 30px;
     display: flex;
     align-items: center;
-    gap: 16px;
-    padding: 0 12px;
+    justify-content: space-between;
+    padding: 0 6px 0 12px;
     border-bottom: 1px solid var(--color-border);
     user-select: none;
   }
-  .panel-tab {
+  .tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 100%;
+    overflow-x: auto;
+  }
+  .tab {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 100%;
+    padding: 0 4px 0 8px;
     font-size: 12px;
-    padding: 4px 0;
     color: var(--color-text-muted);
     border-bottom: 1px solid transparent;
+    cursor: pointer;
   }
-  .panel-tab.active {
+  .tab.active {
     color: var(--color-text);
     border-bottom-color: var(--color-accent);
+  }
+  .name.exited {
+    text-decoration: line-through;
+    opacity: 0.6;
+  }
+  .close {
+    width: 16px;
+    height: 16px;
+    line-height: 1;
+    font-size: 13px;
+    border-radius: 3px;
+    color: var(--color-text-muted);
+  }
+  .close:hover {
+    background: var(--color-bg-hover);
+    color: var(--color-text);
+  }
+  .new-terminal {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    color: var(--color-text-muted);
+  }
+  .new-terminal:hover {
+    background: var(--color-bg-hover);
+    color: var(--color-text);
+  }
+  .new-terminal svg {
+    width: 15px;
+    height: 15px;
   }
   .panel-content {
     flex: 1;
     min-height: 0;
-    overflow: auto;
-    padding: 12px;
+    position: relative;
+  }
+  .terminal-slot {
+    position: absolute;
+    inset: 0;
+  }
+  .terminal-slot.hidden {
+    display: none;
   }
   .placeholder {
     margin: 0;
+    padding: 12px;
     font-size: 13px;
     color: var(--color-text-muted);
   }

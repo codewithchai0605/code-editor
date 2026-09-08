@@ -4,6 +4,7 @@
   import { editorStore } from "$lib/stores/editor.svelte";
   import { workspace } from "$lib/stores/workspace.svelte";
   import { paletteState } from "$lib/stores/palette.svelte";
+  import { themeStore } from "$lib/stores/theme.svelte";
   import { registerCoreCommands } from "$lib/commands/coreCommands";
   import ActivityBar from "./ActivityBar.svelte";
   import Sidebar from "./Sidebar.svelte";
@@ -14,6 +15,8 @@
   import PaletteHost from "./PaletteHost.svelte";
 
   onMount(() => {
+    themeStore.applyInitial();
+
     const unregisterCommands = registerCoreCommands();
 
     const updateSize = () => layout.setWindowSize(window.innerWidth, window.innerHeight);

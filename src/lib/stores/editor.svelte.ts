@@ -4,7 +4,8 @@ import { readTextFile, writeTextFile, readBinaryPreview } from "$lib/api/fs";
 import { isFsError } from "$lib/types/fs";
 import { guessFileKind, type FileKind } from "$lib/editor/fileKind";
 import { loadLanguage } from "$lib/editor/languages";
-import { baseExtensions } from "$lib/editor/setup";
+import { baseExtensions, themeCompartment } from "$lib/editor/setup";
+import { themeStore } from "./theme.svelte";
 
 export interface OpenTab {
   path: string;
@@ -35,6 +36,15 @@ class EditorStore {
    *  update for a real edit and mark a freshly-activated tab dirty. See
    *  TextEditor.svelte. */
   suppressDirtyTracking = false;
+
+  /** The live CodeMirror view, registered by TextEditor.svelte whenever a
+   *  text tab is mounted. Only needed so a theme change can be pushed into
+   *  the currently-visible editor immediately — see applyThemeToOpenTabs. */
+  private activeView: EditorView | null = null;
+
+  registerActiveView(view: EditorView | null): void {
+    this.activeView = view;
+  }
 
   get activeTab(): OpenTab | undefined {
     return this.tabs.find((t) => t.path === this.activePath);
@@ -71,7 +81,7 @@ class EditorStore {
     try {
       const [content, language] = await Promise.all([readTextFile(path), loadLanguage(path)]);
       const extensions: Extension[] = [
-        ...baseExtensions(() => this.save(path)),
+        ...baseExtensions(() => this.save(path), themeStore.theme),
         ...(language ? [language] : []),
         EditorView.updateListener.of((update) => {
           if (!update.docChanged) return;
@@ -119,6 +129,27 @@ class EditorStore {
   private markDirty(path: string): void {
     const tab = this.findTab(path);
     if (tab && !tab.isDirty) tab.isDirty = true;
+  }
+
+  /** Reconfigures the theme compartment in every open text tab's stored
+   *  state — including tabs that aren't currently visible — so a theme
+   *  switch applies everywhere at once instead of only the active tab
+   *  (with the rest catching up whenever they're next activated). The
+   *  active tab additionally gets pushed into the live view directly,
+   *  since updating a background tab's `cmState` object alone doesn't
+   *  touch anything currently on screen. */
+  applyThemeToOpenTabs(extension: Extension): void {
+    const effects = themeCompartment.reconfigure(extension);
+    for (const tab of this.tabs) {
+      if (tab.kind !== "text" || !tab.cmState) continue;
+      const nextState = tab.cmState.update({ effects }).state;
+      tab.cmState = nextState;
+      if (tab.path === this.activePath && this.activeView) {
+        this.suppressDirtyTracking = true;
+        this.activeView.setState(nextState);
+        this.suppressDirtyTracking = false;
+      }
+    }
   }
 
   activate(path: string): void {

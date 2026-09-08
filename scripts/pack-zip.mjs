@@ -5,6 +5,7 @@ import { join, relative } from "node:path";
 const files = [
     "./src/",                 // folder
     "./src-tauri/src",        // folder
+    "./scripts",              // folder
     "./src-tauri/Cargo.toml", // file
     "./package.json",         // file
     "./README.md",            // file

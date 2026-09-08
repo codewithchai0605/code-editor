@@ -22,7 +22,7 @@
       <ul class="hints">
         <li><kbd>Ctrl</kbd>+<kbd>P</kbd> Quick Open</li>
         <li><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> Command Palette</li>
-        <li><kbd>Ctrl</kbd>+<kbd>`</kbd> Toggle Terminal <span class="soon">soon</span></li>
+        <li><kbd>Ctrl</kbd>+<kbd>`</kbd> Toggle Terminal</li>
         <li><kbd>Ctrl</kbd>+<kbd>S</kbd> Save</li>
         <li><kbd>Ctrl</kbd>+<kbd>B</kbd> Toggle Sidebar</li>
       </ul>
@@ -102,11 +102,6 @@
     font-family: var(--font-mono);
     font-size: 12px;
     color: var(--color-text);
-  }
-  .soon {
-    margin-left: 4px;
-    font-size: 11px;
-    color: var(--color-text-faint);
   }
   .status-message {
     flex: 1;

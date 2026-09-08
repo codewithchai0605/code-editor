@@ -477,3 +477,58 @@ pub fn read_binary_preview(path: String) -> Result<Box<[u8]>, FsError> {
     buf.truncate(bytes_read);
     Ok(buf.into_boxed_slice())
 }
+
+// ---------------------------------------------------------------------------
+// Workspace file index for Quick Open. Fuzzy matching itself happens on the
+// frontend (see src/lib/utils/fuzzyMatch.ts) — this just needs to hand back
+// a reasonably-sized, reasonably-clean list of file paths.
+// ---------------------------------------------------------------------------
+
+/// Directories that are always pruned during the walk (not just filtered
+/// after the fact) — `filter_entry` skips descending into them entirely, so
+/// a huge `node_modules` never actually gets enumerated. `.gitignore` rules
+/// are respected on top of this via `ignore::WalkBuilder`'s defaults.
+const ALWAYS_SKIP_DIRS: &[&str] = &[
+    ".git",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    ".next",
+    "__pycache__",
+    ".venv",
+    "venv",
+];
+
+const MAX_INDEXED_FILES: usize = 20_000;
+
+#[tauri::command]
+pub fn list_workspace_files(root: String) -> Result<Box<[Box<str>]>, FsError> {
+    let mut out: Vec<Box<str>> = Vec::new();
+
+    let walker = ignore::WalkBuilder::new(&root)
+        // Keep dotfiles (`.env`, `.eslintrc`, etc.) — they're common,
+        // legitimate project files a project's .gitignore doesn't usually
+        // hide them from `git` itself, just from search-by-default tools.
+        .hidden(false)
+        .filter_entry(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .map(|name| !ALWAYS_SKIP_DIRS.contains(&name))
+                .unwrap_or(true)
+        })
+        .build();
+
+    for result in walker {
+        if out.len() >= MAX_INDEXED_FILES {
+            break;
+        }
+        let Ok(entry) = result else { continue };
+        if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            out.push(entry.path().to_string_lossy().into_owned().into_boxed_str());
+        }
+    }
+
+    Ok(out.into_boxed_slice())
+}

@@ -2,6 +2,7 @@ import { commandRegistry } from "./registry.svelte";
 import { layout } from "$lib/stores/layout.svelte";
 import { workspace } from "$lib/stores/workspace.svelte";
 import { editorStore } from "$lib/stores/editor.svelte";
+import { paletteState } from "$lib/stores/palette.svelte";
 
 /**
  * The `keybinding` field on several of these is a *display hint* for the
@@ -59,6 +60,11 @@ export function registerCoreCommands(): () => void {
       title: "View: Toggle Panel",
       keybinding: "Ctrl+`",
       run: () => layout.togglePanel(),
+    }),
+    commandRegistry.register({
+      id: "workbench.selectTheme",
+      title: "Preferences: Color Theme",
+      run: () => paletteState.open("theme"),
     }),
   ];
 

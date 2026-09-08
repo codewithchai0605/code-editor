@@ -1,4 +1,4 @@
-export type PaletteKind = "quickOpen" | "commandPalette" | null;
+export type PaletteKind = "quickOpen" | "commandPalette" | "theme" | null;
 
 class PaletteState {
   active = $state<PaletteKind>(null);
