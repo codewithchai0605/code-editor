@@ -5,6 +5,7 @@
   import { workspace } from "$lib/stores/workspace.svelte";
   import { paletteState } from "$lib/stores/palette.svelte";
   import { themeStore } from "$lib/stores/theme.svelte";
+  import { markdownPreviewStore } from "$lib/stores/markdownPreview.svelte";
   import { registerCoreCommands } from "$lib/commands/coreCommands";
   import ActivityBar from "./ActivityBar.svelte";
   import Sidebar from "./Sidebar.svelte";
@@ -18,6 +19,7 @@
     themeStore.applyInitial();
 
     const unregisterCommands = registerCoreCommands();
+    workspace.initFsWatcherListener();
 
     const updateSize = () => layout.setWindowSize(window.innerWidth, window.innerHeight);
     updateSize();
@@ -42,6 +44,9 @@
       } else if (e.key.toLowerCase() === "p" && e.shiftKey) {
         e.preventDefault();
         paletteState.toggle("commandPalette");
+      } else if (e.key.toLowerCase() === "v" && e.shiftKey) {
+        e.preventDefault();
+        markdownPreviewStore.toggle();
       } else if (e.key.toLowerCase() === "p") {
         e.preventDefault();
         if (workspace.rootPath) paletteState.toggle("quickOpen");
@@ -70,8 +75,14 @@
       <EditorArea />
       {#if layout.panelOpen}
         <ResizeHandle orientation="horizontal" onDrag={(dy) => layout.setPanelHeight(layout.panelHeight - dy)} />
-        <Panel />
       {/if}
+      <!-- Always mounted (visibility toggled via CSS inside Panel itself)
+           rather than `{#if layout.panelOpen}` — every terminal session's
+           xterm.js instance lives inside Panel's tree, and unmounting it
+           on every `Ctrl+\`` would destroy and recreate the terminal UI
+           each time, wiping its scrollback/screen even though the actual
+           shell process behind it is still alive. See Panel.svelte. -->
+      <Panel />
     </div>
   </div>
 

@@ -96,10 +96,14 @@ export function buildCmTheme(theme: Theme): Extension {
 }
 
 /** Derives an xterm.js `ITheme`-shaped object from the same palette, so the
- *  integrated terminal re-tints along with everything else. ANSI colors
- *  (used by programs that print in color) are a fixed, reasonably
- *  standard dark palette shared across themes for now — only the base
- *  background/foreground/cursor/selection vary per theme. */
+ *  integrated terminal re-tints along with everything else — including
+ *  ANSI colors (used by programs that print in color), which previously
+ *  stayed a fixed dark palette regardless of the active theme. A light
+ *  theme with a dark-terminal ANSI set looked broken (dark text on a
+ *  light background with no contrast tuning); deriving every slot from
+ *  `theme.colors` — reusing the same hues the syntax highlighter already
+ *  uses for keywords/strings/etc. — keeps the terminal visually part of
+ *  the same theme instead of a bolted-on VS-Code-flavored constant. */
 export function buildTerminalTheme(theme: Theme): Record<string, string> {
   const c = theme.colors;
   return {
@@ -108,22 +112,29 @@ export function buildTerminalTheme(theme: Theme): Record<string, string> {
     cursor: c.text,
     cursorAccent: c.bg,
     selectionBackground: c.selection,
-    black: "#1e1e1e",
-    red: "#f44747",
-    green: "#6a9955",
-    yellow: "#d7ba7d",
-    blue: "#569cd6",
-    magenta: "#c586c0",
-    cyan: "#4ec9b0",
+    // "Black" still needs to read as text against the terminal's own
+    // background, so it's a muted foreground shade rather than literally
+    // black (which would be invisible on a dark theme and match the
+    // background exactly on some light ones).
+    black: c.textFaint,
+    red: c.invalid,
+    green: c.string,
+    yellow: c.number,
+    blue: c.keyword,
+    magenta: c.controlKeyword,
+    cyan: c.type,
     white: c.text,
-    brightBlack: c.textFaint,
-    brightRed: "#f44747",
-    brightGreen: "#b5cea8",
-    brightYellow: "#dcdcaa",
-    brightBlue: "#9cdcfe",
-    brightMagenta: "#c586c0",
-    brightCyan: "#4ec9b0",
-    brightWhite: "#ffffff",
+    brightBlack: c.textMuted,
+    brightRed: c.invalid,
+    brightGreen: c.string,
+    brightYellow: c.number,
+    // Distinct from `blue` the same way VS Code's own scheme separates
+    // keyword-blue from variable-blue — `variable` reads as a lighter,
+    // more saturated blue in every shipped theme.
+    brightBlue: c.variable,
+    brightMagenta: c.controlKeyword,
+    brightCyan: c.type,
+    brightWhite: theme.dark ? "#ffffff" : c.text,
   };
 }
 

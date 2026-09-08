@@ -11,14 +11,28 @@ import {
   rectangularSelection,
   crosshairCursor,
 } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  indentWithTab,
+  moveLineUp,
+  moveLineDown,
+  copyLineUp,
+  copyLineDown,
+} from "@codemirror/commands";
 import {
   indentOnInput,
   bracketMatching,
   foldGutter,
   foldKeymap,
 } from "@codemirror/language";
-import { searchKeymap, highlightSelectionMatches, openSearchPanel } from "@codemirror/search";
+import {
+  searchKeymap,
+  highlightSelectionMatches,
+  openSearchPanel,
+  selectNextOccurrence,
+} from "@codemirror/search";
 import { closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap } from "@codemirror/autocomplete";
 import type { Theme } from "./themes/types";
 import { buildCmTheme } from "./themeEngine";
@@ -28,6 +42,8 @@ import { rainbowBrackets } from "./rainbow-brackets";
 import tagAutoRename from "./tag-auto-rename";
 import indentationFolding from "./indentation-folding";
 import { colorChips } from "./color-chip";
+import { emmetExpandCommand } from "./emmet";
+import { extensionOf } from "$lib/utils/fileIcons";
 
 /**
  * Holds the theme's CodeMirror extension (chrome + syntax highlighting)
@@ -58,8 +74,17 @@ export const themeCompartment = new Compartment();
  * custom find/replace panel (`search.ts` + `SearchPanel.svelte`) in place
  * of CodeMirror's default DOM-built one, so it can match the app's design
  * system.
+ *
+ * `filePath` (optional — omitted for e.g. an unsaved/untitled buffer) is
+ * only used to pick an extension-appropriate Tab behavior: Emmet-expand
+ * for markup/stylesheet files, ordinary indent everywhere else. Snippets
+ * are attached separately, per-language, in languages.ts — they need a
+ * loaded `Language` instance to hang off of, which isn't available yet at
+ * this point for a freshly-opened tab.
  */
-export function baseExtensions(onSave: () => void, initialTheme: Theme): Extension[] {
+export function baseExtensions(onSave: () => void, initialTheme: Theme, filePath?: string): Extension[] {
+  const emmetExpand = filePath ? emmetExpandCommand(extensionOf(filePath)) : null;
+
   return [
     lineNumbers(),
     highlightActiveLineGutter(),
@@ -94,12 +119,24 @@ export function baseExtensions(onSave: () => void, initialTheme: Theme): Extensi
         },
       },
       { key: "Mod-f", run: openSearchPanel },
+      { key: "Mod-d", run: selectNextOccurrence },
+      { key: "Alt-ArrowUp", run: moveLineUp },
+      { key: "Alt-ArrowDown", run: moveLineDown },
+      { key: "Shift-Alt-ArrowUp", run: copyLineUp },
+      { key: "Shift-Alt-ArrowDown", run: copyLineDown },
       ...closeBracketsKeymap,
       ...defaultKeymap,
       ...searchKeymap.filter((binding) => binding.key !== "Mod-f"),
       ...historyKeymap,
       ...foldKeymap,
       ...completionKeymap,
+      // Tried before `indentWithTab` so an Emmet-expandable file gets a
+      // real expansion on Tab when the cursor sits after a valid
+      // abbreviation; `emmetExpand` itself returns false (falling through
+      // to ordinary indent) for anything that isn't one, an active
+      // selection, or a non-markup/stylesheet file (where it's `null` and
+      // never added at all).
+      ...(emmetExpand ? [{ key: "Tab", run: emmetExpand }] : []),
       indentWithTab,
     ]),
   ];

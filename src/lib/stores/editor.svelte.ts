@@ -46,6 +46,14 @@ class EditorStore {
     this.activeView = view;
   }
 
+  /** The live view behind the currently-visible text tab, if any — needed
+   *  by any command that acts on the editor directly (move/copy line,
+   *  select-next-occurrence, a future quick-fix menu, ...) rather than on
+   *  `workspace`/`layout` state. See coreCommands.ts. */
+  get view(): EditorView | null {
+    return this.activeView;
+  }
+
   get activeTab(): OpenTab | undefined {
     return this.tabs.find((t) => t.path === this.activePath);
   }
@@ -81,7 +89,7 @@ class EditorStore {
     try {
       const [content, language] = await Promise.all([readTextFile(path), loadLanguage(path)]);
       const extensions: Extension[] = [
-        ...baseExtensions(() => this.save(path), themeStore.theme),
+        ...baseExtensions(() => this.save(path), themeStore.theme, path),
         ...(language ? [language] : []),
         EditorView.updateListener.of((update) => {
           if (!update.docChanged) return;

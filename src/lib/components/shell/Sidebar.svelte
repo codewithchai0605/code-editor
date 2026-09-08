@@ -1,10 +1,12 @@
 <script lang="ts">
   import { layout } from "$lib/stores/layout.svelte";
   import FileTree from "$lib/components/explorer/FileTree.svelte";
+  import TaskManager from "$lib/components/sidebar/TaskManager.svelte";
 
   const titles: Record<string, string> = {
     explorer: "Explorer",
     search: "Search",
+    processes: "Task Manager",
     extensions: "Extensions",
     settings: "Settings",
   };
@@ -19,6 +21,8 @@
       <FileTree />
     {:else if layout.activeView === "search"}
       <p class="placeholder">Workspace search is coming in a later phase.</p>
+    {:else if layout.activeView === "processes"}
+      <TaskManager />
     {:else if layout.activeView === "extensions"}
       <p class="placeholder">Installed native extensions will be listed here once the plugin host lands.</p>
     {:else}

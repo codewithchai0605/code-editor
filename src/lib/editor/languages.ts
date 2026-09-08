@@ -1,5 +1,7 @@
 import type { Extension } from "@codemirror/state";
+import { LanguageSupport } from "@codemirror/language";
 import { extensionOf } from "$lib/utils/fileIcons";
+import { snippetSourceFor } from "./snippets";
 
 type LanguageLoader = () => Promise<Extension>;
 
@@ -37,15 +39,28 @@ const loaders: Record<string, LanguageLoader> = {
   svg: async () => (await import("@codemirror/lang-xml")).xml(),
   yaml: async () => (await import("@codemirror/lang-yaml")).yaml(),
   yml: async () => (await import("@codemirror/lang-yaml")).yaml(),
+  env: async () => (await import("./languages/env")).envLanguage,
+  prisma: async () => (await import("./languages/prisma")).prismaLanguage,
 };
 
 /** Returns `null` for unrecognized extensions — the file still opens and
  *  edits fine, just without syntax highlighting. */
 export async function loadLanguage(fileName: string): Promise<Extension | null> {
-  const loader = loaders[extensionOf(fileName)];
+  const ext = extensionOf(fileName);
+  const loader = loaders[ext];
   if (!loader) return null;
   try {
-    return await loader();
+    const support = await loader();
+    // Snippets are attached to the *language's own* data facet (rather
+    // than via `autocompletion()`'s `override` back in setup.ts) so they
+    // show up alongside each language package's own built-in completions
+    // instead of silently replacing them — `override` takes over the
+    // entire completion source list, built-ins included.
+    const snippetSource = snippetSourceFor(ext);
+    if (snippetSource && support instanceof LanguageSupport) {
+      return [support, support.language.data.of({ autocomplete: snippetSource })];
+    }
+    return support;
   } catch (err) {
     console.error("Failed to load language support:", err);
     return null;

@@ -1,0 +1,71 @@
+@top Program { (Block | LineComment)* }
+
+@skip { space }
+
+@dialects { multi }
+
+Block {
+  BlockHeader BlockBody
+}
+
+BlockHeader {
+  BlockType Identifier (String)?
+}
+
+BlockBody { "{" (Field | BlockAttribute | EnumValue | LineComment)* "}" }
+
+Field {
+  FieldName "=" FieldValue |
+  FieldName FieldType (Attribute)*
+}
+
+FieldType {
+  Type (ArrayMarker)? ("?" | "!")?
+}
+
+FieldValue {
+  String |
+  Number |
+  FunctionCall
+}
+
+FunctionCall {
+  Identifier "(" (FunctionArg ("," FunctionArg)*)? ")"
+}
+
+FunctionArg {
+  String |
+  Number |
+  FunctionCall |
+  Identifier |
+  FieldName ":" FieldName |
+  FieldName ":" "[" FieldName ("," FieldName)* "]" |
+  "[" FieldName ("," FieldName)* "]"
+}
+
+Attribute {
+  AttributeName ("(" (FunctionArg ("," FunctionArg)*)? ")")?
+}
+
+BlockAttribute {
+  BlockAttrName ("(" (FunctionArg ("," FunctionArg)*)? ")")?
+}
+
+@external tokens prismaTokens from "./tokens" {
+  LineComment,
+  Identifier,
+  FieldName,
+  Type,
+  EnumValue
+  AttributeName,
+  BlockAttrName,
+  String,
+  Number,
+  ArrayMarker
+}
+
+@tokens {
+  BlockType { "datasource" | "generator" | "model" | "enum" | "type" | "view" }
+  "@" "@@" "{" "}" "(" ")" "[" "]" "," ":" "=" "?" "!" "." "|" "&"
+  space { $[ \t\n\r]+ }
+}

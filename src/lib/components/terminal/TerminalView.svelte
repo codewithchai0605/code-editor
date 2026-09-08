@@ -7,7 +7,9 @@
   import { writeToTerminal, resizeTerminal } from "$lib/api/pty";
   import { terminalStore } from "$lib/stores/terminal.svelte";
   import { themeStore } from "$lib/stores/theme.svelte";
+  import { layout } from "$lib/stores/layout.svelte";
   import { buildTerminalTheme } from "$lib/editor/themeEngine";
+  import { resolveCssVar } from "$lib/utils/cssVar";
 
   interface Props {
     id: string;
@@ -21,7 +23,10 @@
 
   onMount(() => {
     term = new Terminal({
-      fontFamily: "var(--font-mono)",
+      // xterm renders to a <canvas>, whose 2D context `font` property
+      // doesn't understand `var(...)` the way a real CSS rule does — pass
+      // the resolved literal font stack instead. See cssVar.ts.
+      fontFamily: resolveCssVar("--font-mono", "monospace"),
       fontSize: 13,
       cursorBlink: true,
       scrollback: 5000,
@@ -75,9 +80,15 @@
 
   // Re-fit + refocus whenever this session becomes the visible one — its
   // container may have been display:none (zero size) while inactive, so
-  // dimensions need recomputing now that it's actually on screen.
+  // dimensions need recomputing now that it's actually on screen. Also
+  // re-runs when the whole panel opens/closes: Panel.svelte now stays
+  // mounted permanently (see its comment), toggling visibility via CSS,
+  // and a container going from display:none straight to its final size
+  // does fire ResizeObserver in every engine tested — but re-fitting here
+  // too costs nothing and removes any dependency on that timing being
+  // reliable across every WebView this ships on.
   $effect(() => {
-    if (active) {
+    if (active && layout.panelOpen) {
       queueMicrotask(() => {
         fitAddon?.fit();
         term?.focus();

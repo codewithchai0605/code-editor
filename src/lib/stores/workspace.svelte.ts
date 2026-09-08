@@ -1,5 +1,6 @@
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 import {
   openWorkspace,
   readDir,
@@ -11,6 +12,7 @@ import {
 } from "$lib/api/fs";
 import { isFsError, type FsEntry } from "$lib/types/fs";
 import { baseName, parentOf } from "$lib/utils/path";
+import { gitStore } from "./git.svelte";
 
 /**
  * Central state for the Explorer: which folder is open, which directories
@@ -60,6 +62,7 @@ class WorkspaceState {
   pendingConflict = $state<PendingConflict | null>(null);
   copyProgress = $state<{ done: number; total: number } | null>(null);
   lastError = $state<string | null>(null);
+  private fsListenerStarted = false;
 
   childrenOf(path: string): FsEntry[] | undefined {
     return this.dirs.get(path)?.children;
@@ -67,6 +70,21 @@ class WorkspaceState {
 
   isLoading(path: string): boolean {
     return this.dirs.get(path)?.loading ?? false;
+  }
+
+  /** Wires up the backend's `fs:changed` events (emitted by the workspace
+   *  file watcher started in fs.rs's `open_workspace`) to re-fetch whatever
+   *  directories they touch. The watcher itself has always been running —
+   *  nothing on this side was listening for its events, so an external
+   *  change (another program's checkout, `npm install`, a build script)
+   *  never showed up in the tree until the app was restarted. Call once,
+   *  e.g. from Shell.svelte's onMount. */
+  initFsWatcherListener(): void {
+    if (this.fsListenerStarted) return;
+    this.fsListenerStarted = true;
+    listen<string[]>("fs:changed", (event) => {
+      for (const dir of event.payload) this.refresh(dir);
+    });
   }
 
   // --- open / refresh ----------------------------------------------------
@@ -93,6 +111,10 @@ class WorkspaceState {
       this.rootPath = path;
       this.rootName = baseName(path);
       this.lastError = null;
+      // Not awaited — git status shouldn't block the tree from opening
+      // (a slow/huge repo's status walk is unrelated to whether the
+      // *files* are ready to show), and `setRoot` handles its own errors.
+      void gitStore.setRoot(path);
     } catch (err) {
       this.lastError = describeError(err);
     }

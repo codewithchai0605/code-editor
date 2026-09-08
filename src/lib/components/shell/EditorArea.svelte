@@ -1,13 +1,25 @@
 <script lang="ts">
   import { editorStore } from "$lib/stores/editor.svelte";
+  import { markdownPreviewStore } from "$lib/stores/markdownPreview.svelte";
+  import { extensionOf } from "$lib/utils/fileIcons";
   import TabBar from "$lib/components/editor/TabBar.svelte";
   import TextEditor from "$lib/components/editor/TextEditor.svelte";
+  import MarkdownPreview from "$lib/components/editor/MarkdownPreview.svelte";
   import ImageViewer from "$lib/components/editor/ImageViewer.svelte";
   import AudioViewer from "$lib/components/editor/AudioViewer.svelte";
   import BinaryViewer from "$lib/components/editor/BinaryViewer.svelte";
   import UnsavedChangesDialog from "./UnsavedChangesDialog.svelte";
 
   const tab = $derived(editorStore.activeTab);
+  const isMarkdown = $derived(
+    tab?.kind === "text" && ["md", "markdown"].includes(extensionOf(tab.path)),
+  );
+  const showPreview = $derived(isMarkdown && markdownPreviewStore.open && !!tab?.cmState);
+  // Re-derives on every doc change (`tab.cmState` is replaced on each edit —
+  // see editor.svelte.ts's syncDoc) — MarkdownPreview.svelte debounces the
+  // actual re-render internally, so recomputing this string per keystroke
+  // doesn't translate into a full re-parse per keystroke.
+  const markdownSource = $derived(tab?.cmState?.doc.toString() ?? "");
 </script>
 
 <section class="editor-area">
@@ -34,7 +46,14 @@
       <p>{tab.error}</p>
     </div>
   {:else if tab.kind === "text" && tab.cmState}
-    <TextEditor {tab} />
+    {#if showPreview}
+      <div class="split-view">
+        <div class="split-pane"><TextEditor {tab} /></div>
+        <div class="split-pane divider"><MarkdownPreview content={markdownSource} /></div>
+      </div>
+    {:else}
+      <TextEditor {tab} />
+    {/if}
   {:else if tab.kind === "image"}
     <ImageViewer path={tab.path} />
   {:else if tab.kind === "audio"}
@@ -116,5 +135,20 @@
   }
   .status-message.error p {
     color: #f48771;
+  }
+  .split-view {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: row;
+  }
+  .split-pane {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .split-pane.divider {
+    border-left: 1px solid var(--color-border);
   }
 </style>

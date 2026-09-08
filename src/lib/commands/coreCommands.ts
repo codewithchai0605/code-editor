@@ -3,6 +3,25 @@ import { layout } from "$lib/stores/layout.svelte";
 import { workspace } from "$lib/stores/workspace.svelte";
 import { editorStore } from "$lib/stores/editor.svelte";
 import { paletteState } from "$lib/stores/palette.svelte";
+import { markdownPreviewStore } from "$lib/stores/markdownPreview.svelte";
+import {
+  moveLineUp,
+  moveLineDown,
+  copyLineUp,
+  copyLineDown,
+} from "@codemirror/commands";
+import { selectNextOccurrence } from "@codemirror/search";
+import type { EditorView } from "@codemirror/view";
+
+/** Runs a CodeMirror command against the currently-visible editor, if
+ *  there is one — the shared wrapper every editor-scoped command below
+ *  goes through, since (unlike `workspace`/`layout` commands) these need
+ *  a live `EditorView` rather than just app state. See editorStore.view. */
+function onActiveView(run: (view: EditorView) => boolean) {
+  return () => {
+    if (editorStore.view) run(editorStore.view);
+  };
+}
 
 /**
  * The `keybinding` field on several of these is a *display hint* for the
@@ -65,6 +84,42 @@ export function registerCoreCommands(): () => void {
       id: "workbench.selectTheme",
       title: "Preferences: Color Theme",
       run: () => paletteState.open("theme"),
+    }),
+    commandRegistry.register({
+      id: "editor.moveLineUp",
+      title: "Line: Move Up",
+      keybinding: "Alt+↑",
+      run: onActiveView(moveLineUp),
+    }),
+    commandRegistry.register({
+      id: "editor.moveLineDown",
+      title: "Line: Move Down",
+      keybinding: "Alt+↓",
+      run: onActiveView(moveLineDown),
+    }),
+    commandRegistry.register({
+      id: "editor.copyLineUp",
+      title: "Line: Copy Up",
+      keybinding: "Shift+Alt+↑",
+      run: onActiveView(copyLineUp),
+    }),
+    commandRegistry.register({
+      id: "editor.copyLineDown",
+      title: "Line: Copy Down",
+      keybinding: "Shift+Alt+↓",
+      run: onActiveView(copyLineDown),
+    }),
+    commandRegistry.register({
+      id: "editor.selectNextOccurrence",
+      title: "Selection: Select Next Occurrence",
+      keybinding: "Ctrl+D",
+      run: onActiveView(selectNextOccurrence),
+    }),
+    commandRegistry.register({
+      id: "markdown.togglePreview",
+      title: "Markdown: Toggle Preview",
+      keybinding: "Ctrl+Shift+V",
+      run: () => markdownPreviewStore.toggle(),
     }),
   ];
 

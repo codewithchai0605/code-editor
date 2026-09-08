@@ -11,6 +11,9 @@
 
   let creatingFirst = false;
   $effect(() => {
+    // Panel is now always mounted (see Shell.svelte) so this effect keeps
+    // running after the panel is first closed — bail out each time rather
+    // than only guarding the one-time setup below.
     if (!layout.panelOpen) return;
 
     if (!TerminalView) {
@@ -31,7 +34,11 @@
   });
 </script>
 
-<section class="panel" style:height="{layout.panelHeight}px">
+<section
+  class="panel"
+  class:closed={!layout.panelOpen}
+  style:height="{layout.panelOpen ? layout.panelHeight : 0}px"
+>
   <header class="panel-header">
     <div class="tabs" role="tablist" aria-label="Terminal sessions">
       {#each terminalStore.sessions as session (session.id)}
@@ -94,6 +101,14 @@
     background: var(--color-bg);
     border-top: 1px solid var(--color-border);
     overflow: hidden;
+  }
+  /* Hidden this way (rather than unmounted via `{#if}` in Shell.svelte) so
+     every TerminalView instance underneath stays alive across a close/open
+     of the panel — see the comment on <Panel /> in Shell.svelte. `min-height`
+     above would otherwise still reserve 100px of dead space once `height`
+     is driven to 0, so it needs its own override here. */
+  .panel.closed {
+    display: none;
   }
   .panel-header {
     flex-shrink: 0;

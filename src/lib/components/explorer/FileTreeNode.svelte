@@ -4,6 +4,7 @@
   import { workspace } from "$lib/stores/workspace.svelte";
   import { editorStore } from "$lib/stores/editor.svelte";
   import { dnd } from "$lib/stores/dnd.svelte";
+  import { gitStore } from "$lib/stores/git.svelte";
   import { fileIconColor } from "$lib/utils/fileIcons";
   import { parentOf } from "$lib/utils/path";
   import { validateEntryName } from "$lib/utils/validateName";
@@ -29,6 +30,18 @@
   const creatingHere = $derived(
     entry.isDir && workspace.creating?.parentDir === entry.path ? workspace.creating : null,
   );
+  // Only decorates files directly, not directories aggregating their
+  // descendants' status — the tree is lazily loaded, so a collapsed
+  // folder's children aren't even necessarily fetched yet to check.
+  const gitStatus = $derived(entry.isDir ? undefined : gitStore.statusFor(entry.path));
+  const GIT_BADGE: Record<string, string> = {
+    modified: "M",
+    added: "A",
+    deleted: "D",
+    renamed: "R",
+    untracked: "U",
+    conflicted: "!",
+  };
 
   let renameValue = $state("");
   let renameError = $state<string | null>(null);
@@ -164,7 +177,10 @@
       onclick={(e) => e.stopPropagation()}
     />
   {:else}
-    <span class="name">{entry.name}</span>
+    <span class="name" class:git-changed={!!gitStatus} data-git-status={gitStatus?.status}>{entry.name}</span>
+    {#if gitStatus}
+      <span class="git-badge" data-git-status={gitStatus.status}>{GIT_BADGE[gitStatus.status]}</span>
+    {/if}
   {/if}
 </div>
 {#if isRenaming && renameError}
@@ -235,6 +251,44 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 13px;
+  }
+  /* Colors follow VS Code's own convention, so it reads the same way to
+     anyone coming from there: orange for a modification in progress,
+     green for something new (added/untracked), red for something gone or
+     in conflict. */
+  .name.git-changed[data-git-status="modified"] {
+    color: #e2c08d;
+  }
+  .name.git-changed[data-git-status="added"],
+  .name.git-changed[data-git-status="untracked"] {
+    color: #73c991;
+  }
+  .name.git-changed[data-git-status="deleted"],
+  .name.git-changed[data-git-status="conflicted"] {
+    color: #f48771;
+  }
+  .name.git-changed[data-git-status="renamed"] {
+    color: #73c991;
+  }
+  .git-badge {
+    flex-shrink: 0;
+    margin-left: auto;
+    padding-right: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    opacity: 0.85;
+  }
+  .git-badge[data-git-status="modified"] {
+    color: #e2c08d;
+  }
+  .git-badge[data-git-status="added"],
+  .git-badge[data-git-status="untracked"],
+  .git-badge[data-git-status="renamed"] {
+    color: #73c991;
+  }
+  .git-badge[data-git-status="deleted"],
+  .git-badge[data-git-status="conflicted"] {
+    color: #f48771;
   }
   .rename-input {
     flex: 1;

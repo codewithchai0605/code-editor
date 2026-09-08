@@ -8,4 +8,6 @@
 
 pub mod app;
 pub mod fs;
+pub mod git;
+pub mod process_monitor;
 pub mod pty;

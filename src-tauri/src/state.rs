@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 /// Shared across every command via `tauri::State<AppState>`.
 ///
-/// Both fields are behind a `Mutex` because Tauri commands can run
+/// The watcher fields are behind a `Mutex` because Tauri commands can run
 /// concurrently on different threads — opening a second workspace while a
 /// copy from the first is still in flight must not tear either one down
 /// half-finished.
@@ -19,6 +19,12 @@ pub struct AppState {
     /// Keeping the debouncer alive is what keeps the watch active — dropping
     /// it (e.g. by replacing this with `None`) stops watching immediately.
     pub watcher: Mutex<Option<Debouncer<RecommendedWatcher>>>,
+    /// Same idea as `watcher` above, but scoped to a repo's `.git` internals
+    /// (HEAD/index/refs) rather than the workspace's files — see
+    /// commands/git.rs. A separate field (rather than reusing `watcher`)
+    /// since a workspace can be watched for file changes without being a
+    /// git repo at all, and the two watchers have independent lifetimes.
+    pub git_watcher: Mutex<Option<Debouncer<RecommendedWatcher>>>,
 }
 
 /// Everything needed to keep one terminal tab alive: the PTY handle (for
@@ -46,4 +52,19 @@ impl PtyState {
         let n = self.next_id.fetch_add(1, Ordering::Relaxed);
         format!("term-{n}")
     }
+}
+
+/// Backs the Task Manager view. `system` is a *long-lived* `sysinfo::System`
+/// rather than one built fresh per call — sysinfo computes CPU-usage deltas
+/// against the previous refresh of the same instance, so recreating it
+/// every poll would make every reading come back as 0%.
+///
+/// `extra` lets a future subsystem (a language server, a formatter daemon,
+/// anything spawned outside `PtyState`) show up in the same list without
+/// this module needing to know about it in advance — see
+/// commands/process_monitor.rs's `register_process`/`unregister_process`.
+#[derive(Default)]
+pub struct ProcessMonitorState {
+    pub system: Mutex<sysinfo::System>,
+    pub extra: Mutex<HashMap<String, (String, u32)>>,
 }

@@ -4,6 +4,7 @@
   const topItems: { id: ActivityView; label: string }[] = [
     { id: "explorer", label: "Explorer" },
     { id: "search", label: "Search" },
+    { id: "processes", label: "Task Manager" },
     { id: "extensions", label: "Extensions" },
   ];
 </script>
@@ -23,6 +24,10 @@
       <rect x="3" y="3" width="7.5" height="7.5" rx="1.2" />
       <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.2" />
       <rect x="8.25" y="13.5" width="7.5" height="7.5" rx="1.2" />
+    </svg>
+  {:else if id === "processes"}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+      <path d="M3 12h4l2-7 4 14 2-7h6" stroke-linecap="round" stroke-linejoin="round" />
     </svg>
   {:else}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
