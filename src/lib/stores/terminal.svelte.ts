@@ -1,10 +1,14 @@
-import { createTerminal, closeTerminal } from "$lib/api/pty";
+import { reserveTerminalId, closeTerminal } from "$lib/api/pty";
 import { layout } from "./layout.svelte";
 
 export interface TerminalSession {
   id: string;
   title: string;
   exited: boolean;
+  /** Read by TerminalView.svelte, which is what actually calls
+   *  `createTerminal(id, cwd)` — see its onMount for why the spawn itself
+   *  doesn't happen here. */
+  cwd?: string;
 }
 
 class TerminalStore {
@@ -12,10 +16,17 @@ class TerminalStore {
   activeId = $state<string | null>(null);
   private counter = 0;
 
+  /** Reserves an id and adds a session placeholder — it does *not* spawn
+   *  the actual shell process. That happens in TerminalView.svelte's
+   *  onMount, once its `pty:data:{id}` listener is confirmed attached, so
+   *  the shell can never write output before anything is listening for
+   *  it. This method itself only awaits a cheap id-allocation call (no
+   *  process spawn), so there's no meaningful delay before the session
+   *  appears and its view starts mounting. */
   async createSession(cwd?: string): Promise<void> {
-    const id = await createTerminal(cwd);
+    const id = await reserveTerminalId();
     this.counter++;
-    this.sessions.push({ id, title: `Terminal ${this.counter}`, exited: false });
+    this.sessions.push({ id, title: `Terminal ${this.counter}`, exited: false, cwd });
     this.activeId = id;
   }
 
@@ -40,8 +51,7 @@ class TerminalStore {
   }
 
   markExited(id: string): void {
-    const session = this.sessions.find((s) => s.id === id);
-    if (session) session.exited = true;
+    void this.closeSession(id);
   }
 }
 

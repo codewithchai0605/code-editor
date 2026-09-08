@@ -45,8 +45,22 @@ fn spawn_reader_thread(app: AppHandle, id: String, mut reader: Box<dyn Read + Se
     });
 }
 
+/// Allocates a terminal id without spawning anything yet. Split out from
+/// `create_terminal` specifically so the frontend can attach its
+/// `pty:data:{id}` listener *before* anything exists to emit on it — see
+/// the comment on `create_terminal` below for why that ordering matters.
 #[tauri::command]
-pub fn create_terminal(app: AppHandle, pty_state: State<PtyState>, cwd: Option<String>) -> Result<String, String> {
+pub fn reserve_terminal_id(pty_state: State<PtyState>) -> String {
+    pty_state.next_id()
+}
+
+#[tauri::command]
+pub fn create_terminal(
+    app: AppHandle,
+    pty_state: State<PtyState>,
+    id: String,
+    cwd: Option<String>,
+) -> Result<(), String> {
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -78,7 +92,6 @@ pub fn create_terminal(app: AppHandle, pty_state: State<PtyState>, cwd: Option<S
     let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
 
-    let id = pty_state.next_id();
     pty_state.sessions.lock().unwrap().insert(
         id.clone(),
         TerminalSession {
@@ -88,9 +101,19 @@ pub fn create_terminal(app: AppHandle, pty_state: State<PtyState>, cwd: Option<S
         },
     );
 
-    spawn_reader_thread(app, id.clone(), reader);
+    // By the time this call happens, the frontend has already `await`ed
+    // its `listen("pty:data:{id}", ...)` call (see TerminalView.svelte) —
+    // `id` was handed to it by `reserve_terminal_id` *before* this command
+    // was ever invoked, specifically so that promise resolves first. The
+    // previous single-command version generated the id and started this
+    // same reader thread synchronously inside one call, so a fast-starting
+    // shell could (and reliably did, on Windows especially) write its
+    // whole initial prompt before the frontend's listener existed — Tauri
+    // doesn't buffer or replay events for a listener that attaches late,
+    // so that output was just gone, leaving an apparently-blank terminal.
+    spawn_reader_thread(app, id, reader);
 
-    Ok(id)
+    Ok(())
 }
 
 #[tauri::command]

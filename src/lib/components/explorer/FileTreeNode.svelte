@@ -6,6 +6,7 @@
   import { dnd } from "$lib/stores/dnd.svelte";
   import { gitStore } from "$lib/stores/git.svelte";
   import { fileIconColor } from "$lib/utils/fileIcons";
+  import { fileIconUrl, folderIconUrl } from "$lib/utils/iconTheme";
   import { parentOf } from "$lib/utils/path";
   import { validateEntryName } from "$lib/utils/validateName";
   import { TREE_ACTIONS_KEY, type TreeActions } from "./context";
@@ -42,6 +43,13 @@
     untracked: "U",
     conflicted: "!",
   };
+  // Themed SVG icon for this entry, if the current icon set covers it — C:/Users/sanje/Desktop/coding/code-editor/node_modules/.vite/deps/chunk-MLSXQQI7.js
+  // `undefined` falls back to the generic tinted-glyph icon below, so this
+  // degrades gracefully as icons get added to src/lib/assets/icons over
+  // time rather than requiring full coverage before any of it can be used.
+  const themedIconUrl = $derived(
+    entry.isDir ? folderIconUrl(entry.name, isExpanded) : fileIconUrl(entry.name),
+  );
 
   let renameValue = $state("");
   let renameError = $state<string | null>(null);
@@ -158,14 +166,18 @@
     <span class="chevron-spacer"></span>
   {/if}
 
-  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke={entry.isDir ? "var(--color-text-muted)" : fileIconColor(entry.name)} stroke-width="1.6">
-    {#if entry.isDir}
-      <path d="M4 5a1 1 0 0 1 1-1h4.5l2 2H19a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5z" />
-    {:else}
-      <path d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
-      <path d="M14 3v4a1 1 0 0 0 1 1h4" />
-    {/if}
-  </svg>
+  {#if themedIconUrl}
+    <img class="icon" src={themedIconUrl} alt="" />
+  {:else}
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke={entry.isDir ? "var(--color-text-muted)" : fileIconColor(entry.name)} stroke-width="1.6">
+      {#if entry.isDir}
+        <path d="M4 5a1 1 0 0 1 1-1h4.5l2 2H19a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5z" />
+      {:else}
+        <path d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
+        <path d="M14 3v4a1 1 0 0 0 1 1h4" />
+      {/if}
+    </svg>
+  {/if}
 
   {#if isRenaming}
     <input
@@ -245,6 +257,7 @@
     width: 16px;
     height: 16px;
     flex-shrink: 0;
+    object-fit: contain;
   }
   .name {
     overflow: hidden;

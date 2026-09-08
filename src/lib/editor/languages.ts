@@ -6,6 +6,25 @@ import { snippetSourceFor } from "./snippets";
 type LanguageLoader = () => Promise<Extension>;
 
 /**
+ * `.env` files are exactly the case `extensionOf()` isn't built for: a
+ * plain `.env` has no "extension" by that function's definition (the
+ * leading dot IS the only dot, so `extensionOf` correctly treats it as a
+ * dotfile with no extension), and `.env.local`/`.env.production` etc.
+ * would resolve to `local`/`production` — the *last* dot-segment — not
+ * `env`. Matching the filename shape directly here, rather than trying to
+ * bend `extensionOf`'s general "last segment after the last dot" rule to
+ * cover this one special case too, keeps that function's contract simple
+ * for everything else that relies on it (snippets, Emmet, file icons).
+ */
+const DOTENV_PATTERN = /^\.env(\..+)?$/i;
+
+function languageKeyFor(fileName: string): string {
+  const baseName = fileName.split(/[\\/]/).pop() ?? fileName;
+  if (DOTENV_PATTERN.test(baseName)) return "env";
+  return extensionOf(fileName);
+}
+
+/**
  * Every loader is a dynamic import, so the language parser for a file type
  * only ever gets fetched/parsed once a file of that type is actually
  * opened — the initial bundle stays limited to CodeMirror's core, not
@@ -46,7 +65,7 @@ const loaders: Record<string, LanguageLoader> = {
 /** Returns `null` for unrecognized extensions — the file still opens and
  *  edits fine, just without syntax highlighting. */
 export async function loadLanguage(fileName: string): Promise<Extension | null> {
-  const ext = extensionOf(fileName);
+  const ext = languageKeyFor(fileName);
   const loader = loaders[ext];
   if (!loader) return null;
   try {

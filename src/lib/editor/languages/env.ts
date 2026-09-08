@@ -1,4 +1,4 @@
-import { autocompletion, type CompletionContext, snippetCompletion } from "@codemirror/autocomplete";
+import { type CompletionContext, snippetCompletion } from "@codemirror/autocomplete";
 import { StreamLanguage, type StringStream } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 
@@ -154,7 +154,16 @@ export const envLanguage = StreamLanguage.define({
 
     },
     languageData: {
-        autocompletion: autocompletion({ override: [envCompletions] }),
+        // The key here must be "autocomplete" (a `CompletionSource`), which
+        // is what CodeMirror's own `autocompletion()` extension (already
+        // added once, globally, in setup.ts) actually reads back out of
+        // language data when no `override` is configured. The previous
+        // version stored the *result of calling* `autocompletion(...)` —
+        // a whole separate Extension bundling its own state fields/keymap —
+        // under the key "autocompletion", which nothing reads: the real
+        // extension never saw `envCompletions`, so env-file autocomplete
+        // was silently inert.
+        autocomplete: envCompletions,
         commentTokens: { line: "#" }
     }
 })

@@ -24,6 +24,7 @@ pub fn run() {
             commands::fs::write_text_file,
             commands::fs::read_binary_preview,
             commands::fs::list_workspace_files,
+            commands::pty::reserve_terminal_id,
             commands::pty::create_terminal,
             commands::pty::write_to_terminal,
             commands::pty::resize_terminal,

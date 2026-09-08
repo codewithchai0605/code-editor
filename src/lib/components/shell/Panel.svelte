@@ -7,7 +7,7 @@
   // xterm.js is a substantial library that most sessions may never need
   // (the panel starts closed) — deferring the import until the panel is
   // actually opened keeps it out of the main bundle entirely.
-  let TerminalView = $state<Component<{ id: string; active: boolean }> | null>(null);
+  let TerminalView = $state<Component<{ id: string; active: boolean; cwd?: string }> | null>(null);
 
   let creatingFirst = false;
   $effect(() => {
@@ -80,7 +80,7 @@
     {#if TerminalView}
       {#each terminalStore.sessions as session (session.id)}
         <div class="terminal-slot" class:hidden={session.id !== terminalStore.activeId}>
-          <TerminalView id={session.id} active={session.id === terminalStore.activeId} />
+          <TerminalView id={session.id} active={session.id === terminalStore.activeId} cwd={session.cwd} />
         </div>
       {/each}
     {:else if terminalStore.sessions.length > 0}

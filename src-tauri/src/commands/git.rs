@@ -116,9 +116,24 @@ fn compute_status(root: &Path) -> Result<GitStatusResult, String> {
         .filter_map(|entry| {
             let (kind, staged) = classify(entry.status())?;
             let rel_path = entry.path().ok()?;
+            // git always reports this path with `/` separators internally,
+            // even on Windows — joining it as-is onto `workdir` (a native
+            // Windows `PathBuf`) produces a *mixed*-separator string
+            // (`C:\repo\src/components/App.svelte`), which then silently
+            // never string-matches `FsEntry.path` from fs.rs (built via
+            // native `PathBuf` joins throughout, so pure backslashes on
+            // Windows). That mismatch is why file-tree badges never
+            // rendered on Windows despite the branch/status data itself
+            // being fetched correctly — normalizing to the OS's own
+            // separator first makes the two sides compare equal.
+            let normalized: std::borrow::Cow<str> = if cfg!(windows) {
+                std::borrow::Cow::Owned(rel_path.replace('/', "\\"))
+            } else {
+                std::borrow::Cow::Borrowed(rel_path)
+            };
             Some(GitFileStatus {
                 path: workdir
-                    .join(rel_path)
+                    .join(normalized.as_ref())
                     .to_string_lossy()
                     .into_owned()
                     .into_boxed_str(),
