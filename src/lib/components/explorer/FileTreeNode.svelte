@@ -24,17 +24,31 @@
   const isExpanded = $derived(workspace.expanded.has(entry.path));
   const isSelected = $derived(workspace.selected.has(entry.path));
   const isRenaming = $derived(workspace.renamingPath === entry.path);
-  const isDropTarget = $derived(entry.isDir && dnd.dropTargetPath === entry.path);
-  const isDragging = $derived(dnd.draggingPaths?.includes(entry.path) ?? false);
-  const children = $derived(entry.isDir ? workspace.childrenOf(entry.path) : undefined);
-  const loading = $derived(entry.isDir ? workspace.isLoading(entry.path) : false);
-  const creatingHere = $derived(
-    entry.isDir && workspace.creating?.parentDir === entry.path ? workspace.creating : null,
+  const isDropTarget = $derived(
+    entry.isDir && dnd.dropTargetPath === entry.path,
   );
-  // Only decorates files directly, not directories aggregating their
-  // descendants' status — the tree is lazily loaded, so a collapsed
-  // folder's children aren't even necessarily fetched yet to check.
-  const gitStatus = $derived(entry.isDir ? undefined : gitStore.statusFor(entry.path));
+  const isDragging = $derived(dnd.draggingPaths?.includes(entry.path) ?? false);
+  const children = $derived(
+    entry.isDir ? workspace.childrenOf(entry.path) : undefined,
+  );
+  const loading = $derived(
+    entry.isDir ? workspace.isLoading(entry.path) : false,
+  );
+  const creatingHere = $derived(
+    entry.isDir && workspace.creating?.parentDir === entry.path
+      ? workspace.creating
+      : null,
+  );
+  // Folders show the aggregated (highest-priority) status among every
+  // changed file underneath them — computed in gitStore from the flat
+  // status list itself, not from this component's lazily-loaded tree
+  // state, so it's correct even for a folder whose children haven't been
+  // expanded/fetched yet.
+  const gitStatus = $derived(
+    entry.isDir
+      ? gitStore.folderStatusFor(entry.path)
+      : gitStore.statusFor(entry.path)?.status,
+  );
   const GIT_BADGE: Record<string, string> = {
     modified: "M",
     added: "A",
@@ -43,12 +57,14 @@
     untracked: "U",
     conflicted: "!",
   };
-  // Themed SVG icon for this entry, if the current icon set covers it — C:/Users/sanje/Desktop/coding/code-editor/node_modules/.vite/deps/chunk-MLSXQQI7.js
+  // Themed SVG icon for this entry, if the current icon set covers it —
   // `undefined` falls back to the generic tinted-glyph icon below, so this
   // degrades gracefully as icons get added to src/lib/assets/icons over
   // time rather than requiring full coverage before any of it can be used.
   const themedIconUrl = $derived(
-    entry.isDir ? folderIconUrl(entry.name, isExpanded) : fileIconUrl(entry.name),
+    entry.isDir
+      ? folderIconUrl(entry.name, isExpanded)
+      : fileIconUrl(entry.name),
   );
 
   let renameValue = $state("");
@@ -159,7 +175,14 @@
   onkeydown={onRowKeydown}
 >
   {#if entry.isDir}
-    <svg class="chevron" class:expanded={isExpanded} viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+    <svg
+      class="chevron"
+      class:expanded={isExpanded}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+    >
       <path d="M6 3l5 5-5 5" />
     </svg>
   {:else}
@@ -169,11 +192,23 @@
   {#if themedIconUrl}
     <img class="icon" src={themedIconUrl} alt="" />
   {:else}
-    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke={entry.isDir ? "var(--color-text-muted)" : fileIconColor(entry.name)} stroke-width="1.6">
+    <svg
+      class="icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={entry.isDir
+        ? "var(--color-text-muted)"
+        : fileIconColor(entry.name)}
+      stroke-width="1.6"
+    >
       {#if entry.isDir}
-        <path d="M4 5a1 1 0 0 1 1-1h4.5l2 2H19a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5z" />
+        <path
+          d="M4 5a1 1 0 0 1 1-1h4.5l2 2H19a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5z"
+        />
       {:else}
-        <path d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
+        <path
+          d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"
+        />
         <path d="M14 3v4a1 1 0 0 0 1 1h4" />
       {/if}
     </svg>
@@ -189,20 +224,30 @@
       onclick={(e) => e.stopPropagation()}
     />
   {:else}
-    <span class="name" class:git-changed={!!gitStatus} data-git-status={gitStatus?.status}>{entry.name}</span>
+    <span
+      class="name"
+      class:git-changed={!!gitStatus}
+      data-git-status={gitStatus}>{entry.name}</span
+    >
     {#if gitStatus}
-      <span class="git-badge" data-git-status={gitStatus.status}>{GIT_BADGE[gitStatus.status]}</span>
+      <span class="git-badge" data-git-status={gitStatus}
+        >{GIT_BADGE[gitStatus]}</span
+      >
     {/if}
   {/if}
 </div>
 {#if isRenaming && renameError}
-  <p class="rename-error" style:padding-left="{depth * 14 + 30}px">{renameError}</p>
+  <p class="rename-error" style:padding-left="{depth * 14 + 30}px">
+    {renameError}
+  </p>
 {/if}
 
 {#if entry.isDir && isExpanded}
   <div role="group">
     {#if loading}
-      <p class="hint" style:padding-left="{(depth + 1) * 14 + 30}px">Loading&hellip;</p>
+      <p class="hint" style:padding-left="{(depth + 1) * 14 + 30}px">
+        Loading&hellip;
+      </p>
     {:else}
       {#each children ?? [] as child (child.path)}
         <FileTreeNode entry={child} depth={depth + 1} />
@@ -211,7 +256,9 @@
         <NewEntryRow depth={depth + 1} isDir={creatingHere.isDir} />
       {/if}
       {#if (children ?? []).length === 0 && !creatingHere}
-        <p class="hint" style:padding-left="{(depth + 1) * 14 + 30}px">Empty folder</p>
+        <p class="hint" style:padding-left="{(depth + 1) * 14 + 30}px">
+          Empty folder
+        </p>
       {/if}
     {/if}
   </div>

@@ -1,7 +1,7 @@
 export const fileIcons = [
 	{
 		name: 'html',
-		file_extensions: ['htm', 'xhtml', 'html_vm', 'asp'],
+		file_extensions: ['htm', 'xhtml', 'html_vm', 'asp', 'html'],
 	},
 	{
 		name: 'markdown',
@@ -220,7 +220,7 @@ export const fileIcons = [
 	},
 	{
 		name: 'typescript',
-		file_extensions: ['.ts'],
+		file_extensions: ['ts'],
 	},
 	{
 		name: 'typescript-def',

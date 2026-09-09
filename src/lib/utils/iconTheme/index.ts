@@ -61,19 +61,27 @@ const folderIndex = buildFolderIndex(folderIcons as FolderIconRule[]);
 
 function resolveFileIconName(fileName: string): string | undefined {
   const lower = fileName.toLowerCase();
+
+  // 1. Exact filename rule wins.
   const exact = fileIndex.byExactName.get(lower);
   if (exact) return exact;
 
-  const segments = lower.split(".");
-  for (let i = 1; i < segments.length; i++) {
-    const match = fileIndex.byExtension.get(segments.slice(i).join("."));
-    if (match) return match;
+  // 2. Try compound extensions from longest to shortest.
+  const parts = lower.split(".");
+
+  for (let i = 1; i < parts.length; i++) {
+    const extension = parts.slice(i).join(".");
+    const iconName = fileIndex.byExtension.get(extension);
+
+    if (iconName) return iconName;
   }
+
   return undefined;
 }
 
 export function fileIconUrl(fileName: string): string | undefined {
   const name = resolveFileIconName(fileName);
+  console.log("fileIconUrl", fileName, name);
   return name ? urlForIconName(name) : undefined;
 }
 

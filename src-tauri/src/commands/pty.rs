@@ -5,13 +5,13 @@ use std::thread;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Picks a sensible default shell per platform. On Windows this tries
-/// PowerShell first (matching what most current-generation editors default
+/// PowerShell 7 first (matching what most current-generation editors default
 /// to) and falls back to whatever `ComSpec` points at — typically
 /// `cmd.exe` — if PowerShell isn't on PATH. On Unix, `$SHELL` if set,
 /// otherwise `/bin/bash`.
 fn default_shell_command() -> CommandBuilder {
     if cfg!(windows) {
-        CommandBuilder::new("powershell.exe")
+        CommandBuilder::new("pwsh.exe")
     } else {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
         CommandBuilder::new(shell)
