@@ -59,7 +59,7 @@ function buildFolderIndex(rules: FolderIconRule[]): Map<string, string> {
 const fileIndex = buildFileIndex(fileIcons as FileIconRule[]);
 const folderIndex = buildFolderIndex(folderIcons as FolderIconRule[]);
 
-function resolveFileIconName(fileName: string): string | undefined {
+export function resolveFileIconName(fileName: string): string | undefined {
   const lower = fileName.toLowerCase();
 
   // 1. Exact filename rule wins.
@@ -81,7 +81,6 @@ function resolveFileIconName(fileName: string): string | undefined {
 
 export function fileIconUrl(fileName: string): string | undefined {
   const name = resolveFileIconName(fileName);
-  console.log("fileIconUrl", fileName, name);
   return name ? urlForIconName(name) : undefined;
 }
 

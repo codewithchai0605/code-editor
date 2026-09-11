@@ -4,6 +4,7 @@
   const topItems: { id: ActivityView; label: string }[] = [
     { id: "explorer", label: "Explorer" },
     { id: "search", label: "Search" },
+    { id: "scm", label: "Source Control" },
     { id: "processes", label: "Task Manager" },
     { id: "extensions", label: "Extensions" },
   ];
@@ -11,26 +12,70 @@
 
 {#snippet icon(id: ActivityView)}
   {#if id === "explorer"}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-      <path d="M4 5a1 1 0 0 1 1-1h4.5l2 2H19a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5z" />
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.6"
+    >
+      <path
+        d="M4 5a1 1 0 0 1 1-1h4.5l2 2H19a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5z"
+      />
     </svg>
   {:else if id === "search"}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.6"
+    >
       <circle cx="10.5" cy="10.5" r="6.5" />
       <line x1="20" y1="20" x2="15.2" y2="15.2" />
     </svg>
+  {:else if id === "scm"}
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.6"
+    >
+      <circle cx="6" cy="6" r="2.3" />
+      <circle cx="6" cy="18" r="2.3" />
+      <circle cx="18" cy="9" r="2.3" />
+      <path d="M6 8.3v7.4" />
+      <path d="M6 8.3c0 4 3 5.7 7 5.7h3" stroke-linecap="round" />
+    </svg>
   {:else if id === "extensions"}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.6"
+    >
       <rect x="3" y="3" width="7.5" height="7.5" rx="1.2" />
       <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.2" />
       <rect x="8.25" y="13.5" width="7.5" height="7.5" rx="1.2" />
     </svg>
   {:else if id === "processes"}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-      <path d="M3 12h4l2-7 4 14 2-7h6" stroke-linecap="round" stroke-linejoin="round" />
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.6"
+    >
+      <path
+        d="M3 12h4l2-7 4 14 2-7h6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
     </svg>
   {:else}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.6"
+    >
       <circle cx="12" cy="12" r="3" />
       <circle cx="12" cy="12" r="8" stroke-dasharray="3 3.2" />
     </svg>

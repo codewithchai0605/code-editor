@@ -7,35 +7,70 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
-/// Shared across every command via `tauri::State<AppState>`.
-///
-/// The watcher fields are behind a `Mutex` because Tauri commands can run
-/// concurrently on different threads — opening a second workspace while a
-/// copy from the first is still in flight must not tear either one down
-/// half-finished.
 #[derive(Default)]
 pub struct AppState {
     pub workspace_root: Mutex<Option<PathBuf>>,
-    /// Keeping the debouncer alive is what keeps the watch active — dropping
-    /// it (e.g. by replacing this with `None`) stops watching immediately.
     pub watcher: Mutex<Option<Debouncer<RecommendedWatcher>>>,
-    /// Same idea as `watcher` above, but scoped to a repo's `.git` internals
-    /// (HEAD/index/refs) rather than the workspace's files — see
-    /// commands/git.rs. A separate field (rather than reusing `watcher`)
-    /// since a workspace can be watched for file changes without being a
-    /// git repo at all, and the two watchers have independent lifetimes.
-    pub git_watcher: Mutex<Option<Debouncer<RecommendedWatcher>>>,
+    // pub git_watcher: Mutex<Option<Debouncer<RecommendedWatcher>>>,
 }
 
-/// Everything needed to keep one terminal tab alive: the PTY handle (for
-/// resize), the writer half (for input), and the child process (so we can
-/// kill it on close). The read half lives only inside that session's
-/// background reader thread — see commands/pty.rs — since a blocking
-/// `Read` can't usefully be shared beyond the thread that owns it.
-pub struct TerminalSession {
+/// The PTY/process handles for a session that's actually alive. Split out
+/// from `TerminalSession` so the enum below can represent "doesn't have
+/// these yet" (`Creating`) and "no longer has these" (`Closing`/`Exited`/
+/// `Failed`) states where calling `.write()`/`.resize()` simply isn't
+/// possible to express, rather than needing a runtime check against
+/// fields that are always present but sometimes meaningless.
+pub struct RunningPty {
     pub master: Box<dyn MasterPty + Send>,
     pub writer: Box<dyn Write + Send>,
     pub child: Box<dyn Child + Send + Sync>,
+}
+
+/// Explicit lifecycle for one terminal tab's backing process:
+///
+/// ```text
+/// Creating -> Running -> Closing -> Exited
+///                    \              /
+///                     ----> Failed -
+/// ```
+///
+/// `Creating` covers the brief window between `reserve_terminal_id` and
+/// the PTY/shell actually spawning inside `create_terminal`; `Closing`
+/// covers the window between asking the child to die (`close_terminal`,
+/// or app shutdown) and the reader thread actually observing it gone.
+/// `Exited`/`Failed` are intentionally short-lived — see pty.rs, which
+/// removes the entry from the map shortly after reaching either, so a
+/// long session opening/closing many terminals never accumulates dead
+/// entries in memory.
+pub enum TerminalSession {
+    Creating,
+    Running(RunningPty),
+    Closing,
+    Exited,
+    Failed,
+}
+
+impl TerminalSession {
+    /// `None` for every state except `Running` — the single place every
+    /// write/resize/close/PID-lookup call goes through, so "what do I do
+    /// if this session isn't actually running" only needs answering once.
+    pub fn running(&self) -> Option<&RunningPty> {
+        match self {
+            TerminalSession::Running(pty) => Some(pty),
+            _ => None,
+        }
+    }
+
+    /// Human-readable reason a `running()` call came back empty.
+    pub fn describe(&self) -> &'static str {
+        match self {
+            TerminalSession::Creating => "Terminal is still starting.",
+            TerminalSession::Running(_) => "Terminal is running.",
+            TerminalSession::Closing => "Terminal is closing.",
+            TerminalSession::Exited => "Terminal has exited.",
+            TerminalSession::Failed => "Terminal failed to start.",
+        }
+    }
 }
 
 #[derive(Default)]
@@ -45,24 +80,12 @@ pub struct PtyState {
 }
 
 impl PtyState {
-    /// Simple incrementing id ("term-1", "term-2", ...) rather than a UUID
-    /// dependency — uniqueness within one running app instance is all this
-    /// needs.
     pub fn next_id(&self) -> String {
         let n = self.next_id.fetch_add(1, Ordering::Relaxed);
         format!("term-{n}")
     }
 }
 
-/// Backs the Task Manager view. `system` is a *long-lived* `sysinfo::System`
-/// rather than one built fresh per call — sysinfo computes CPU-usage deltas
-/// against the previous refresh of the same instance, so recreating it
-/// every poll would make every reading come back as 0%.
-///
-/// `extra` lets a future subsystem (a language server, a formatter daemon,
-/// anything spawned outside `PtyState`) show up in the same list without
-/// this module needing to know about it in advance — see
-/// commands/process_monitor.rs's `register_process`/`unregister_process`.
 #[derive(Default)]
 pub struct ProcessMonitorState {
     pub system: Mutex<sysinfo::System>,

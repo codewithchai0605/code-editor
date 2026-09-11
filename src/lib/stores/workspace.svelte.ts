@@ -114,7 +114,7 @@ class WorkspaceState {
       // Not awaited — git status shouldn't block the tree from opening
       // (a slow/huge repo's status walk is unrelated to whether the
       // *files* are ready to show), and `setRoot` handles its own errors.
-      void gitStore.setRoot(path);
+      void gitStore.scanWorkspace(path);
     } catch (err) {
       this.lastError = describeError(err);
     }

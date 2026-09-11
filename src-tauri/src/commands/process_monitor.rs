@@ -71,10 +71,7 @@ pub fn list_tracked_processes(
     {
         let sessions = pty_state.sessions.lock().unwrap();
         for (id, session) in sessions.iter() {
-            // `process_id()` can come back `None` in the brief window
-            // right after a child exits but before its session is pruned
-            // — skip rather than report a bogus pid.
-            if let Some(pid) = session.child.process_id() {
+            if let Some(pid) = session.running().and_then(|pty| pty.child.process_id()) {
                 entries.push((id.clone(), "Terminal shell".to_string(), "terminal", pid));
             }
         }

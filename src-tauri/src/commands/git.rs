@@ -1,97 +1,177 @@
-use crate::state::AppState;
-use git2::{BranchType, Repository, Status, StatusOptions};
-use notify_debouncer_mini::notify::RecursiveMode;
-use notify_debouncer_mini::{new_debouncer, DebounceEventResult};
+use git2::{BranchType, Repository, StatusOptions};
+use notify_debouncer_mini::notify::{RecommendedWatcher, RecursiveMode};
+use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
 use serde::Serialize;
-use std::path::Path;
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GitFileStatus {
-    pub path: Box<str>,
-    /// One of "modified" | "added" | "deleted" | "renamed" | "untracked" |
-    /// "conflicted" — deliberately a string rather than a tagged enum:
-    /// the frontend only ever needs it as a lookup key for a badge
-    /// letter/color (see FileTreeNode.svelte), never branches deeply on it.
-    pub status: Box<str>,
-    pub staged: bool,
-}
+/// Directories never worth descending into while scanning for repos —
+/// either because a nested `.git` there is essentially never intentional
+/// (a vendored dependency checked out with its own repo) or because
+/// descending into them at all is expensive for no benefit (thousands of
+/// files deep in `node_modules`).
+const VENDOR_DIRS: &[&str] = &[
+    "node_modules",
+    "target",
+    "build",
+    "dist",
+    ".dart_tool",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".next",
+    ".nuxt",
+    "vendor",
+    ".gradle",
+    ".cargo",
+];
+/// How many directory levels deep to scan from the workspace root. Deep
+/// enough for any realistic monorepo layout, shallow enough that a huge
+/// tree with no repos in it doesn't turn "open folder" into a slow walk
+/// of the entire filesystem under it.
+const MAX_SCAN_DEPTH: usize = 6;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GitStatusResult {
-    pub is_repo: bool,
-    /// `None` covers both "not a repo" and an unborn branch (a fresh repo
-    /// before its first commit) — `repo.head()` errors in the latter case,
-    /// which isn't a real failure worth surfacing as one.
+pub struct FileEntry {
+    pub path: Box<str>,
+    /// "modified" | "added" | "deleted" | "renamed" | "typechange"
+    pub status: Box<str>,
+}
+
+/// Lightweight per-repo header info — enough to render every detected
+/// repo's collapsed sidebar header (name, branch, ahead/behind) without
+/// paying for a full status walk of each one up front.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoInfo {
+    pub id: Box<str>,
+    pub path: Box<str>,
+    pub name: Box<str>,
+    pub current_branch: Option<Box<str>>,
+    pub ahead: usize,
+    pub behind: usize,
+}
+
+/// The heavier per-repo payload — every changed file, categorized the way
+/// VS Code's own Source Control view groups them. Recomputed and replaced
+/// wholesale on every refresh (see `start_watcher`'s callback), never
+/// mutated field-by-field, which is exactly the case `Box<[T]>` is for
+/// rather than carrying `Vec`'s spare capacity around between refreshes
+/// that will just discard it anyway.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoStatus {
+    pub repo_id: Box<str>,
     pub branch: Option<Box<str>>,
     pub ahead: usize,
     pub behind: usize,
-    pub files: Box<[GitFileStatus]>,
+    pub staged: Box<[FileEntry]>,
+    pub unstaged: Box<[FileEntry]>,
+    pub untracked: Box<[FileEntry]>,
+    pub conflicted: Box<[FileEntry]>,
 }
 
-/// Collapses git2's bitflag `Status` into the single label the file tree
-/// actually renders. Where a path has both an index (staged) and a
-/// worktree (unstaged) change at once, the worktree side wins for the
-/// *label* shown — "still has unstaged changes on top" is the more
-/// actionable thing to surface — while `staged` independently reports
-/// whether *any* of it is already staged.
-fn classify(status: Status) -> Option<(&'static str, bool)> {
-    let staged = status.is_index_new()
-        || status.is_index_modified()
-        || status.is_index_deleted()
-        || status.is_index_renamed()
-        || status.is_index_typechange();
+struct RepoInstance {
+    path: PathBuf,
+    #[allow(dead_code)] // kept alive only to keep the watcher running — dropped, not read
+    watcher: Option<Debouncer<RecommendedWatcher>>,
+}
 
-    if status.is_conflicted() {
-        Some(("conflicted", staged))
-    } else if status.is_wt_deleted() || status.is_index_deleted() {
-        Some(("deleted", staged))
-    } else if status.is_wt_renamed() || status.is_index_renamed() {
-        Some(("renamed", staged))
-    } else if status.is_wt_modified() || status.is_index_modified() || status.is_wt_typechange() {
-        Some(("modified", staged))
-    } else if status.is_wt_new() {
-        // A file only in the worktree (never staged) is untracked; one
-        // that's also `is_index_new` has been `git add`-ed as a new file.
-        Some(("untracked", status.is_index_new()))
-    } else if status.is_index_new() {
-        Some(("added", true))
-    } else {
-        None
+#[derive(Default)]
+pub struct GitManagerState {
+    repos: Mutex<HashMap<String, RepoInstance>>,
+}
+
+/// Recursively finds every repo root under `root` — a directory containing
+/// a `.git` entry, which may be a real directory (a normal repo) or a
+/// *file* containing `gitdir: ...` (a linked worktree or submodule).
+/// Doesn't stop at the first repo found in a subtree: a repo containing a
+/// submodule checked out as an ordinary subfolder has its own nested
+/// `.git`, which is worth surfacing as its own section too (per
+/// AGENT-git.md §2 — "submodules should behave like an independent repo
+/// in the sidebar").
+pub fn scan_for_repos(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    scan_dir(root, 0, &mut found);
+    found
+}
+
+fn scan_dir(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
+    if depth > MAX_SCAN_DEPTH {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+
+    let mut has_git_marker = false;
+    let mut subdirs = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name == ".git" {
+            has_git_marker = true;
+            continue;
+        }
+        if let Ok(file_type) = entry.file_type() {
+            if file_type.is_dir() {
+                let name_str = name.to_string_lossy();
+                if !VENDOR_DIRS.contains(&name_str.as_ref()) {
+                    subdirs.push(entry.path());
+                }
+            }
+        }
+    }
+
+    if has_git_marker {
+        found.push(dir.to_path_buf());
+        // Deliberately not `return`ing here — still worth recursing for a
+        // nested repo (e.g. a submodule) inside this one.
+    }
+    for subdir in subdirs {
+        scan_dir(&subdir, depth + 1, found);
     }
 }
 
-fn compute_status(root: &Path) -> Result<GitStatusResult, String> {
-    let repo = match Repository::discover(root) {
-        Ok(repo) => repo,
-        Err(_) => {
-            // Not inside a git repo at all — a normal, common state, not
-            // an error the caller needs to react to.
-            return Ok(GitStatusResult {
-                is_repo: false,
-                branch: None,
-                ahead: 0,
-                behind: 0,
-                files: Box::new([]),
-            });
-        }
+/// git2 always reports status paths with `/` separators internally, even
+/// on Windows — joining as-is onto a native Windows `PathBuf` would
+/// produce a mixed-separator string that silently fails to string-match
+/// this app's other path values (see the file-tree badge bug this exact
+/// normalization originally fixed).
+fn to_native_path(root: &Path, git_relative_path: &str) -> Box<str> {
+    let normalized: Cow<str> = if cfg!(windows) {
+        Cow::Owned(git_relative_path.replace('/', "\\"))
+    } else {
+        Cow::Borrowed(git_relative_path)
     };
+    root.join(normalized.as_ref())
+        .to_string_lossy()
+        .into_owned()
+        .into_boxed_str()
+}
 
-    let branch: Option<Box<str>> = repo
-        .head()
-        .ok()
-        // `shorthand()` returns a `Result` (it can fail on non-UTF8 ref
-        // names), not an `Option` — `.ok()` bridges it into the `Option`
-        // chain the rest of this is built on.
-        .and_then(|head| head.shorthand().ok().map(|s| s.to_owned().into_boxed_str()));
+fn branch_and_ahead_behind(repo: &Repository) -> (Option<Box<str>>, usize, usize) {
+    let head = repo.head().ok();
 
-    // Ahead/behind needs a configured upstream — most local-only branches
-    // don't have one, which isn't an error, just nothing to report.
-    let (ahead, behind) = branch
-        .as_deref()
+    let branch: Option<Box<str>> = head
+        .as_ref()
+        .and_then(|head| head.shorthand().ok().map(|s| s.to_owned().into_boxed_str()))
+        .or_else(|| {
+            // Detached HEAD — AGENT-git.md §11 calls for showing the short
+            // SHA rather than a blank/broken label in this state.
+            head.as_ref().and_then(|head| head.target()).map(|oid| {
+                let full = oid.to_string();
+                full[..7.min(full.len())].to_string().into_boxed_str()
+            })
+        });
+
+    let (ahead, behind) = head
+        .as_ref()
+        .and_then(|head| head.shorthand().ok())
         .and_then(|name| {
             let local_branch = repo.find_branch(name, BranchType::Local).ok()?;
             let upstream = local_branch.upstream().ok()?;
@@ -101,118 +181,214 @@ fn compute_status(root: &Path) -> Result<GitStatusResult, String> {
         })
         .unwrap_or((0, 0));
 
+    (branch, ahead, behind)
+}
+
+fn compute_repo_info(id: &str, path: &Path) -> Result<RepoInfo, String> {
+    let repo = Repository::open(path).map_err(|e| e.to_string())?;
+    let (branch, ahead, behind) = branch_and_ahead_behind(&repo);
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    Ok(RepoInfo {
+        id: id.into(),
+        path: path.to_string_lossy().into_owned().into_boxed_str(),
+        name: name.into_boxed_str(),
+        current_branch: branch,
+        ahead,
+        behind,
+    })
+}
+
+fn compute_repo_status(id: &str, path: &Path) -> Result<RepoStatus, String> {
+    // `open()`, not `discover()` — the caller already knows the exact repo
+    // root from the scanner, and `discover()` walking upward on a path
+    // that turned out not to be a repo root itself could silently resolve
+    // to a different, unrelated ancestor repo.
+    let repo = Repository::open(path).map_err(|e| e.to_string())?;
+    let (branch, ahead, behind) = branch_and_ahead_behind(&repo);
+
     let mut opts = StatusOptions::new();
     opts.include_untracked(true).recurse_untracked_dirs(true);
     let statuses = repo.statuses(Some(&mut opts)).map_err(|e| e.to_string())?;
 
-    // git2 reports status paths relative to the repo's workdir, not
-    // relative to `root` (which may be a subdirectory the user opened,
-    // not the repo root) — join back onto the workdir so the frontend can
-    // match these against the absolute paths it already has.
-    let workdir = repo.workdir().unwrap_or(root);
+    let mut staged = Vec::new();
+    let mut unstaged = Vec::new();
+    let mut untracked = Vec::new();
+    let mut conflicted = Vec::new();
 
-    let files: Vec<GitFileStatus> = statuses
-        .iter()
-        .filter_map(|entry| {
-            let (kind, staged) = classify(entry.status())?;
-            let rel_path = entry.path().ok()?;
-            // git always reports this path with `/` separators internally,
-            // even on Windows — joining it as-is onto `workdir` (a native
-            // Windows `PathBuf`) produces a *mixed*-separator string
-            // (`C:\repo\src/components/App.svelte`), which then silently
-            // never string-matches `FsEntry.path` from fs.rs (built via
-            // native `PathBuf` joins throughout, so pure backslashes on
-            // Windows). That mismatch is why file-tree badges never
-            // rendered on Windows despite the branch/status data itself
-            // being fetched correctly — normalizing to the OS's own
-            // separator first makes the two sides compare equal.
-            let normalized: std::borrow::Cow<str> = if cfg!(windows) {
-                std::borrow::Cow::Owned(rel_path.replace('/', "\\"))
+    for entry in statuses.iter() {
+        let status = entry.status();
+        let Ok(rel_path) = entry.path() else {
+            continue;
+        };
+        let native_path = to_native_path(path, rel_path);
+
+        if status.is_conflicted() {
+            conflicted.push(FileEntry {
+                path: native_path,
+                status: "conflicted".into(),
+            });
+            continue;
+        }
+        if status.is_wt_new() && !status.is_index_new() {
+            untracked.push(FileEntry {
+                path: native_path,
+                status: "untracked".into(),
+            });
+            continue;
+        }
+
+        let is_staged = status.is_index_new()
+            || status.is_index_modified()
+            || status.is_index_deleted()
+            || status.is_index_renamed()
+            || status.is_index_typechange();
+        let is_unstaged = status.is_wt_modified()
+            || status.is_wt_deleted()
+            || status.is_wt_renamed()
+            || status.is_wt_typechange();
+
+        // A file can legitimately appear in both lists at once — staged
+        // one change, then modified it again — matching VS Code's own
+        // "Staged Changes" / "Changes" split rather than picking one.
+        if is_staged {
+            let kind = if status.is_index_new() {
+                "added"
+            } else if status.is_index_deleted() {
+                "deleted"
+            } else if status.is_index_renamed() {
+                "renamed"
             } else {
-                std::borrow::Cow::Borrowed(rel_path)
+                "modified"
             };
-            Some(GitFileStatus {
-                path: workdir
-                    .join(normalized.as_ref())
-                    .to_string_lossy()
-                    .into_owned()
-                    .into_boxed_str(),
+            staged.push(FileEntry {
+                path: if is_unstaged {
+                    native_path.clone()
+                } else {
+                    native_path
+                },
                 status: kind.into(),
-                staged,
-            })
-        })
-        .collect();
+            });
+        }
+        if is_unstaged {
+            let kind = if status.is_wt_deleted() {
+                "deleted"
+            } else if status.is_wt_renamed() {
+                "renamed"
+            } else {
+                "modified"
+            };
+            unstaged.push(FileEntry {
+                path: to_native_path(path, rel_path),
+                status: kind.into(),
+            });
+        }
+    }
 
-    Ok(GitStatusResult {
-        is_repo: true,
+    Ok(RepoStatus {
+        repo_id: id.into(),
         branch,
         ahead,
         behind,
-        files: files.into_boxed_slice(),
+        staged: staged.into_boxed_slice(),
+        unstaged: unstaged.into_boxed_slice(),
+        untracked: untracked.into_boxed_slice(),
+        conflicted: conflicted.into_boxed_slice(),
     })
 }
 
-#[tauri::command]
-pub fn git_status(path: String) -> Result<GitStatusResult, String> {
-    compute_status(Path::new(&path))
-}
+/// Starts a `.git`-internals watcher for one repo — same approach as the
+/// original single-repo version (watch the `.git` dir non-recursively for
+/// HEAD/index/packed-refs, plus `refs/` recursively for loose ref
+/// updates), just scoped per-`RepoInstance` now, and emitting
+/// `git://status-changed` tagged with the specific repo that changed
+/// rather than a bare signal to re-fetch everything.
+fn start_watcher(
+    app: AppHandle,
+    id: String,
+    repo_path: PathBuf,
+) -> Option<Debouncer<RecommendedWatcher>> {
+    let git_dir = Repository::open(&repo_path).ok()?.path().to_path_buf();
 
-/// Watches the handful of paths directly inside `.git` that every git
-/// operation touches — `HEAD` (checkout/commit), `index` (stage/unstage),
-/// `packed-refs`/`MERGE_HEAD`/etc — plus `refs/**` recursively for loose
-/// branch/tag updates, and emits `git:changed` so the frontend can re-run
-/// `git_status` without polling. Mirrors `commands::fs::start_watcher`'s
-/// shape closely on purpose.
-///
-/// Watching `.git` itself non-recursively (rather than only the literal
-/// `HEAD` file) is deliberate: it also catches `packed-refs`, `MERGE_HEAD`
-/// appearing mid-merge, etc., in one watch, and — since it does *not*
-/// recurse — never gets flooded by the constant small writes under
-/// `.git/objects/` that every commit produces.
-#[tauri::command]
-pub fn git_watch(app: AppHandle, state: State<AppState>, path: String) -> Result<(), String> {
-    let mut watcher_slot = state.git_watcher.lock().unwrap();
-    *watcher_slot = None; // drop any previous watcher first
-
-    // Opening a plain, non-git folder is the common case, not an error —
-    // matches `compute_status`'s handling of the same situation. Returning
-    // `Err` here would surface as an unhandled rejection on the frontend's
-    // fire-and-forget `gitStore.setRoot()` call for every non-repo folder.
-    let repo = match Repository::discover(Path::new(&path)) {
-        Ok(repo) => repo,
-        Err(_) => return Ok(()),
-    };
-    // `repo.path()` is the real `.git` directory, correctly resolved even
-    // for a linked worktree or submodule (where it isn't literally
-    // `<root>/.git`) — using it instead of hand-joining ".git" is what
-    // makes this correct in those cases too.
-    let git_dir = repo.path().to_path_buf();
-
-    let app_handle = app.clone();
+    let watched_path = repo_path.clone();
     let debouncer = new_debouncer(
         Duration::from_millis(300),
         move |result: DebounceEventResult| {
-            if result.is_ok() {
-                let _ = app_handle.emit("git:changed", ());
+            if result.is_err() {
+                return;
+            }
+            match compute_repo_status(&id, &watched_path) {
+                Ok(status) => {
+                    let _ = app.emit("git://status-changed", &status);
+                }
+                Err(message) => {
+                    let _ = app.emit(
+                    "git://operation-error",
+                    serde_json::json!({ "repoId": id, "operation": "status", "message": message }),
+                );
+                }
             }
         },
     );
 
-    if let Ok(mut debouncer) = debouncer {
-        let watcher = debouncer.watcher();
-        let _ = watcher.watch(&git_dir, RecursiveMode::NonRecursive);
-        let refs_dir = git_dir.join("refs");
-        if refs_dir.exists() {
-            let _ = watcher.watch(&refs_dir, RecursiveMode::Recursive);
-        }
-        *watcher_slot = Some(debouncer);
+    let mut debouncer = debouncer.ok()?;
+    let watcher = debouncer.watcher();
+    let _ = watcher.watch(&git_dir, RecursiveMode::NonRecursive);
+    let refs_dir = git_dir.join("refs");
+    if refs_dir.exists() {
+        let _ = watcher.watch(&refs_dir, RecursiveMode::Recursive);
     }
+    Some(debouncer)
+}
 
-    Ok(())
+/// Scans the opened workspace for every repo under it, starts a watcher
+/// for each, and returns their lightweight header info (see `RepoInfo`) —
+/// the sidebar renders these immediately, then fetches each repo's full
+/// `RepoStatus` separately via `git_status`. Replaces whatever repos were
+/// previously tracked (e.g. from a folder opened earlier in the session);
+/// dropping the old `RepoInstance`s here is what stops their watchers.
+#[tauri::command]
+pub fn git_list_repos(
+    app: AppHandle,
+    state: State<GitManagerState>,
+    workspace_path: String,
+) -> Vec<RepoInfo> {
+    let root = PathBuf::from(&workspace_path);
+    let found_paths = scan_for_repos(&root);
+
+    let mut repos = state.repos.lock().unwrap();
+    repos.clear();
+
+    let mut infos = Vec::new();
+    for path in found_paths {
+        let id = path.to_string_lossy().into_owned();
+        if let Ok(info) = compute_repo_info(&id, &path) {
+            let watcher = start_watcher(app.clone(), id.clone(), path.clone());
+            repos.insert(id, RepoInstance { path, watcher });
+            infos.push(info);
+        }
+        // Not actually a usable repo (e.g. a corrupt .git) — skip it
+        // rather than failing the whole scan over one bad entry.
+    }
+    infos
 }
 
 #[tauri::command]
-pub fn git_unwatch(state: State<AppState>) -> Result<(), String> {
-    *state.git_watcher.lock().unwrap() = None;
-    Ok(())
+pub fn git_status(state: State<GitManagerState>, repo_id: String) -> Result<RepoStatus, String> {
+    let repos = state.repos.lock().unwrap();
+    let repo = repos
+        .get(&repo_id)
+        .ok_or_else(|| "Unknown repository.".to_string())?;
+    compute_repo_status(&repo_id, &repo.path)
+}
+
+/// Stops every tracked repo's watcher — call when closing the workspace
+/// (opening a *different* folder already handles this via `git_list_repos`
+/// clearing and replacing the map; this covers the case where no new
+/// folder is opened right after).
+#[tauri::command]
+pub fn git_unwatch_all(state: State<GitManagerState>) {
+    state.repos.lock().unwrap().clear();
 }

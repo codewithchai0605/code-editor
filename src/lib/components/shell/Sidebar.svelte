@@ -2,10 +2,12 @@
   import { layout } from "$lib/stores/layout.svelte";
   import FileTree from "$lib/components/explorer/FileTree.svelte";
   import TaskManager from "$lib/components/sidebar/TaskManager.svelte";
+  import GitPanel from "$lib/components/sidebar/GitPanel.svelte";
 
   const titles: Record<string, string> = {
     explorer: "Explorer",
     search: "Search",
+    scm: "Source Control",
     processes: "Task Manager",
     extensions: "Extensions",
     settings: "Settings",
@@ -16,17 +18,27 @@
   <header class="sidebar-header">
     <span>{titles[layout.activeView]}</span>
   </header>
-  <div class="sidebar-content" class:explorer-mode={layout.activeView === "explorer"}>
+  <div
+    class="sidebar-content"
+    class:explorer-mode={layout.activeView === "explorer"}
+  >
     {#if layout.activeView === "explorer"}
       <FileTree />
     {:else if layout.activeView === "search"}
       <p class="placeholder">Workspace search is coming in a later phase.</p>
+    {:else if layout.activeView === "scm"}
+      <GitPanel />
     {:else if layout.activeView === "processes"}
       <TaskManager />
     {:else if layout.activeView === "extensions"}
-      <p class="placeholder">Installed native extensions will be listed here once the plugin host lands.</p>
+      <p class="placeholder">
+        Installed native extensions will be listed here once the plugin host
+        lands.
+      </p>
     {:else}
-      <p class="placeholder">A settings.json-backed settings UI is coming in a later phase.</p>
+      <p class="placeholder">
+        A settings.json-backed settings UI is coming in a later phase.
+      </p>
     {/if}
   </div>
 </aside>

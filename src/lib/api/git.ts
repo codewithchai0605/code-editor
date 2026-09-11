@@ -1,31 +1,43 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export interface GitFileStatus {
+export interface GitFileEntry {
   path: string;
-  status: "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflicted";
-  staged: boolean;
+  status: "modified" | "added" | "deleted" | "renamed" | "typechange" | "untracked" | "conflicted";
 }
 
-export interface GitStatusResult {
-  isRepo: boolean;
+export interface RepoInfo {
+  id: string;
+  path: string;
+  name: string;
+  currentBranch: string | null;
+  ahead: number;
+  behind: number;
+}
+
+export interface RepoStatus {
+  repoId: string;
   branch: string | null;
   ahead: number;
   behind: number;
-  files: GitFileStatus[];
+  staged: GitFileEntry[];
+  unstaged: GitFileEntry[];
+  untracked: GitFileEntry[];
+  conflicted: GitFileEntry[];
 }
 
-export function gitStatus(path: string): Promise<GitStatusResult> {
-  return invoke<GitStatusResult>("git_status", { path });
+/** Scans the given workspace root for every repo under it (handles
+ *  monorepos / multiple independent repos in one workspace, and
+ *  submodules — see git.rs), starts a watcher for each, and returns their
+ *  lightweight header info. Call `gitStatus` per repo id for the full
+ *  file lists. */
+export function gitListRepos(workspacePath: string): Promise<RepoInfo[]> {
+  return invoke<RepoInfo[]>("git_list_repos", { workspacePath });
 }
 
-/** Starts (or re-points, if already watching a different repo) the
- *  backend's `.git`-internals watcher — see git.rs. Safe to call on a
- *  folder that isn't a git repo at all; the backend just returns without
- *  starting a watch. */
-export function gitWatch(path: string): Promise<void> {
-  return invoke("git_watch", { path });
+export function gitStatus(repoId: string): Promise<RepoStatus> {
+  return invoke<RepoStatus>("git_status", { repoId });
 }
 
-export function gitUnwatch(): Promise<void> {
-  return invoke("git_unwatch");
+export function gitUnwatchAll(): Promise<void> {
+  return invoke("git_unwatch_all");
 }

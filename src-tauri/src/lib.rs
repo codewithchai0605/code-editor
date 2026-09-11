@@ -1,7 +1,9 @@
 mod commands;
 mod state;
 
+use commands::git::GitManagerState;
 use state::{AppState, ProcessMonitorState, PtyState};
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -11,6 +13,7 @@ pub fn run() {
         .manage(AppState::default())
         .manage(PtyState::default())
         .manage(ProcessMonitorState::default())
+        .manage(GitManagerState::default())
         .invoke_handler(tauri::generate_handler![
             commands::app::app_version,
             commands::fs::open_workspace,
@@ -29,14 +32,21 @@ pub fn run() {
             commands::pty::write_to_terminal,
             commands::pty::resize_terminal,
             commands::pty::close_terminal,
+            commands::git::git_list_repos,
             commands::git::git_status,
-            commands::git::git_watch,
-            commands::git::git_unwatch,
+            commands::git::git_unwatch_all,
             commands::process_monitor::list_tracked_processes,
             commands::process_monitor::register_process,
             commands::process_monitor::unregister_process,
             commands::process_monitor::kill_process,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                if let Some(pty_state) = app_handle.try_state::<PtyState>() {
+                    commands::pty::kill_all_sessions(&pty_state);
+                }
+            }
+        });
 }

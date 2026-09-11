@@ -3,6 +3,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { layout } from "$lib/stores/layout.svelte";
   import { gitStore } from "$lib/stores/git.svelte";
+  import { editorStore } from "$lib/stores/editor.svelte";
 
   let version = $state("");
 
@@ -13,31 +14,62 @@
       console.error("Failed to read app version:", err);
     }
   });
+
+  // With multiple repos possible in one workspace, the status bar shows
+  // whichever one is most relevant right now: the repo containing the
+  // active editor tab's file, falling back to the first detected repo.
+  // The Source Control sidebar (opened by clicking this chip) is where
+  // every repo gets its own section — this chip is a summary, not the
+  // full picture.
+  const primaryRepo = $derived(
+    (editorStore.activeTab && gitStore.repoFor(editorStore.activeTab.path)) ??
+      gitStore.repos[0],
+  );
+  const primaryStatus = $derived(
+    primaryRepo ? gitStore.statusOf(primaryRepo.id) : undefined,
+  );
+  const changedCount = $derived(
+    primaryStatus
+      ? primaryStatus.staged.length +
+          primaryStatus.unstaged.length +
+          primaryStatus.untracked.length +
+          primaryStatus.conflicted.length
+      : 0,
+  );
 </script>
 
 <footer class="status-bar">
   <div class="segment">
-    <button class="chip" onclick={() => layout.toggleSidebar()}>Explorer</button>
+    <button class="chip" onclick={() => layout.toggleSidebar()}>Explorer</button
+    >
     <button class="chip" onclick={() => layout.togglePanel()}>Terminal</button>
-    {#if gitStore.isRepo && gitStore.branch}
+    {#if primaryRepo?.currentBranch}
       <button
         class="chip"
-        title={gitStore.changedCount
-          ? `${gitStore.changedCount} changed file${gitStore.changedCount === 1 ? "" : "s"}`
+        title={changedCount
+          ? `${changedCount} changed file${changedCount === 1 ? "" : "s"}`
           : "No changes"}
-        onclick={() => layout.setActiveView("explorer")}
+        onclick={() => layout.setActiveView("scm")}
       >
-        <svg class="branch-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+        <svg
+          class="branch-icon"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.4"
+        >
           <circle cx="4.5" cy="3.5" r="1.5" />
           <circle cx="4.5" cy="12.5" r="1.5" />
           <circle cx="11.5" cy="7.5" r="1.5" />
           <path d="M4.5 5v6" />
           <path d="M4.5 8c0-2.5 1.5-4 4-4h1.5" stroke-linecap="round" />
         </svg>
-        {gitStore.branch}{#if gitStore.ahead || gitStore.behind}
-          &nbsp;{gitStore.ahead ? `↑${gitStore.ahead}` : ""}{gitStore.behind ? `↓${gitStore.behind}` : ""}
+        {primaryRepo.currentBranch}{#if primaryRepo.ahead || primaryRepo.behind}
+          &nbsp;{primaryRepo.ahead
+            ? `↑${primaryRepo.ahead}`
+            : ""}{primaryRepo.behind ? `↓${primaryRepo.behind}` : ""}
         {/if}
-        {#if gitStore.changedCount}
+        {#if changedCount}
           &nbsp;<span class="dirty-dot">●</span>
         {/if}
       </button>

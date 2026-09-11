@@ -9,7 +9,7 @@
  * they never compute clamping themselves.
  */
 
-export type ActivityView = "explorer" | "search" | "extensions" | "settings" | "processes";
+export type ActivityView = "explorer" | "search" | "scm" | "extensions" | "settings" | "processes";
 
 const SIDEBAR_MIN = 170;
 const SIDEBAR_MAX = 600;
