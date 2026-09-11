@@ -38,6 +38,40 @@ export function gitStatus(repoId: string): Promise<RepoStatus> {
   return invoke<RepoStatus>("git_status", { repoId });
 }
 
+export function gitStageFile(repoId: string, path: string): Promise<void> {
+  return invoke("git_stage_file", { repoId, path });
+}
+
+export function gitStageAll(repoId: string): Promise<void> {
+  return invoke("git_stage_all", { repoId });
+}
+
+export function gitUnstageFile(repoId: string, path: string): Promise<void> {
+  return invoke("git_unstage_file", { repoId, path });
+}
+
+export function gitUnstageAll(repoId: string): Promise<void> {
+  return invoke("git_unstage_all", { repoId });
+}
+
+/** Irreversible — caller must confirm with the user before invoking this. */
+export function gitDiscardFile(repoId: string, path: string): Promise<void> {
+  return invoke("git_discard_file", { repoId, path });
+}
+
+/** Same irreversibility note as `gitDiscardFile`. */
+export function gitDiscardAll(repoId: string): Promise<void> {
+  return invoke("git_discard_all", { repoId });
+}
+
+export interface CommitResult {
+  oid: string;
+}
+
+export function gitCommit(repoId: string, message: string): Promise<CommitResult> {
+  return invoke<CommitResult>("git_commit", { repoId, message });
+}
+
 export function gitUnwatchAll(): Promise<void> {
   return invoke("git_unwatch_all");
 }

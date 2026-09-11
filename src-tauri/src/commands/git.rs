@@ -1,3 +1,4 @@
+use git2::build::CheckoutBuilder;
 use git2::{BranchType, Repository, StatusOptions};
 use notify_debouncer_mini::notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
@@ -9,11 +10,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
-/// Directories never worth descending into while scanning for repos —
-/// either because a nested `.git` there is essentially never intentional
-/// (a vendored dependency checked out with its own repo) or because
-/// descending into them at all is expensive for no benefit (thousands of
-/// files deep in `node_modules`).
 const VENDOR_DIRS: &[&str] = &[
     "node_modules",
     "target",
@@ -29,23 +25,15 @@ const VENDOR_DIRS: &[&str] = &[
     ".gradle",
     ".cargo",
 ];
-/// How many directory levels deep to scan from the workspace root. Deep
-/// enough for any realistic monorepo layout, shallow enough that a huge
-/// tree with no repos in it doesn't turn "open folder" into a slow walk
-/// of the entire filesystem under it.
 const MAX_SCAN_DEPTH: usize = 6;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileEntry {
     pub path: Box<str>,
-    /// "modified" | "added" | "deleted" | "renamed" | "typechange"
     pub status: Box<str>,
 }
 
-/// Lightweight per-repo header info — enough to render every detected
-/// repo's collapsed sidebar header (name, branch, ahead/behind) without
-/// paying for a full status walk of each one up front.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoInfo {
@@ -57,12 +45,6 @@ pub struct RepoInfo {
     pub behind: usize,
 }
 
-/// The heavier per-repo payload — every changed file, categorized the way
-/// VS Code's own Source Control view groups them. Recomputed and replaced
-/// wholesale on every refresh (see `start_watcher`'s callback), never
-/// mutated field-by-field, which is exactly the case `Box<[T]>` is for
-/// rather than carrying `Vec`'s spare capacity around between refreshes
-/// that will just discard it anyway.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoStatus {
@@ -78,7 +60,7 @@ pub struct RepoStatus {
 
 struct RepoInstance {
     path: PathBuf,
-    #[allow(dead_code)] // kept alive only to keep the watcher running — dropped, not read
+    #[allow(dead_code)]
     watcher: Option<Debouncer<RecommendedWatcher>>,
 }
 
@@ -87,14 +69,6 @@ pub struct GitManagerState {
     repos: Mutex<HashMap<String, RepoInstance>>,
 }
 
-/// Recursively finds every repo root under `root` — a directory containing
-/// a `.git` entry, which may be a real directory (a normal repo) or a
-/// *file* containing `gitdir: ...` (a linked worktree or submodule).
-/// Doesn't stop at the first repo found in a subtree: a repo containing a
-/// submodule checked out as an ordinary subfolder has its own nested
-/// `.git`, which is worth surfacing as its own section too (per
-/// AGENT-git.md §2 — "submodules should behave like an independent repo
-/// in the sidebar").
 pub fn scan_for_repos(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     scan_dir(root, 0, &mut found);
@@ -129,19 +103,12 @@ fn scan_dir(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
 
     if has_git_marker {
         found.push(dir.to_path_buf());
-        // Deliberately not `return`ing here — still worth recursing for a
-        // nested repo (e.g. a submodule) inside this one.
     }
     for subdir in subdirs {
         scan_dir(&subdir, depth + 1, found);
     }
 }
 
-/// git2 always reports status paths with `/` separators internally, even
-/// on Windows — joining as-is onto a native Windows `PathBuf` would
-/// produce a mixed-separator string that silently fails to string-match
-/// this app's other path values (see the file-tree badge bug this exact
-/// normalization originally fixed).
 fn to_native_path(root: &Path, git_relative_path: &str) -> Box<str> {
     let normalized: Cow<str> = if cfg!(windows) {
         Cow::Owned(git_relative_path.replace('/', "\\"))
@@ -161,8 +128,6 @@ fn branch_and_ahead_behind(repo: &Repository) -> (Option<Box<str>>, usize, usize
         .as_ref()
         .and_then(|head| head.shorthand().ok().map(|s| s.to_owned().into_boxed_str()))
         .or_else(|| {
-            // Detached HEAD — AGENT-git.md §11 calls for showing the short
-            // SHA rather than a blank/broken label in this state.
             head.as_ref().and_then(|head| head.target()).map(|oid| {
                 let full = oid.to_string();
                 full[..7.min(full.len())].to_string().into_boxed_str()
@@ -202,10 +167,6 @@ fn compute_repo_info(id: &str, path: &Path) -> Result<RepoInfo, String> {
 }
 
 fn compute_repo_status(id: &str, path: &Path) -> Result<RepoStatus, String> {
-    // `open()`, not `discover()` — the caller already knows the exact repo
-    // root from the scanner, and `discover()` walking upward on a path
-    // that turned out not to be a repo root itself could silently resolve
-    // to a different, unrelated ancestor repo.
     let repo = Repository::open(path).map_err(|e| e.to_string())?;
     let (branch, ahead, behind) = branch_and_ahead_behind(&repo);
 
@@ -250,9 +211,6 @@ fn compute_repo_status(id: &str, path: &Path) -> Result<RepoStatus, String> {
             || status.is_wt_renamed()
             || status.is_wt_typechange();
 
-        // A file can legitimately appear in both lists at once — staged
-        // one change, then modified it again — matching VS Code's own
-        // "Staged Changes" / "Changes" split rather than picking one.
         if is_staged {
             let kind = if status.is_index_new() {
                 "added"
@@ -299,12 +257,6 @@ fn compute_repo_status(id: &str, path: &Path) -> Result<RepoStatus, String> {
     })
 }
 
-/// Starts a `.git`-internals watcher for one repo — same approach as the
-/// original single-repo version (watch the `.git` dir non-recursively for
-/// HEAD/index/packed-refs, plus `refs/` recursively for loose ref
-/// updates), just scoped per-`RepoInstance` now, and emitting
-/// `git://status-changed` tagged with the specific repo that changed
-/// rather than a bare signal to re-fetch everything.
 fn start_watcher(
     app: AppHandle,
     id: String,
@@ -343,12 +295,6 @@ fn start_watcher(
     Some(debouncer)
 }
 
-/// Scans the opened workspace for every repo under it, starts a watcher
-/// for each, and returns their lightweight header info (see `RepoInfo`) —
-/// the sidebar renders these immediately, then fetches each repo's full
-/// `RepoStatus` separately via `git_status`. Replaces whatever repos were
-/// previously tracked (e.g. from a folder opened earlier in the session);
-/// dropping the old `RepoInstance`s here is what stops their watchers.
 #[tauri::command]
 pub fn git_list_repos(
     app: AppHandle,
@@ -369,8 +315,6 @@ pub fn git_list_repos(
             repos.insert(id, RepoInstance { path, watcher });
             infos.push(info);
         }
-        // Not actually a usable repo (e.g. a corrupt .git) — skip it
-        // rather than failing the whole scan over one bad entry.
     }
     infos
 }
@@ -384,11 +328,217 @@ pub fn git_status(state: State<GitManagerState>, repo_id: String) -> Result<Repo
     compute_repo_status(&repo_id, &repo.path)
 }
 
-/// Stops every tracked repo's watcher — call when closing the workspace
-/// (opening a *different* folder already handles this via `git_list_repos`
-/// clearing and replacing the map; this covers the case where no new
-/// folder is opened right after).
 #[tauri::command]
 pub fn git_unwatch_all(state: State<GitManagerState>) {
     state.repos.lock().unwrap().clear();
+}
+
+fn open_tracked_repo(
+    state: &GitManagerState,
+    repo_id: &str,
+) -> Result<(Repository, PathBuf), String> {
+    let path = {
+        let repos = state.repos.lock().unwrap();
+        repos
+            .get(repo_id)
+            .ok_or_else(|| "Unknown repository.".to_string())?
+            .path
+            .clone()
+    };
+    let repo = Repository::open(&path).map_err(|e| e.to_string())?;
+    Ok((repo, path))
+}
+
+fn relative_to_repo<'a>(repo_root: &Path, absolute: &'a Path) -> Result<&'a Path, String> {
+    absolute
+        .strip_prefix(repo_root)
+        .map_err(|_| "Path is not inside this repository.".to_string())
+}
+
+fn emit_status(app: &AppHandle, repo_id: &str, repo_path: &Path) {
+    if let Ok(status) = compute_repo_status(repo_id, repo_path) {
+        let _ = app.emit("git://status-changed", &status);
+    }
+}
+
+fn stage_path(repo: &Repository, rel: &Path, absolute: &Path) -> Result<(), String> {
+    let mut index = repo.index().map_err(|e| e.to_string())?;
+    if absolute.exists() {
+        index.add_path(rel).map_err(|e| e.to_string())?;
+    } else {
+        index.remove_path(rel).map_err(|e| e.to_string())?;
+    }
+    index.write().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn git_stage_file(
+    app: AppHandle,
+    state: State<GitManagerState>,
+    repo_id: String,
+    path: String,
+) -> Result<(), String> {
+    let (repo, repo_path) = open_tracked_repo(&state, &repo_id)?;
+    let absolute = PathBuf::from(&path);
+    let rel = relative_to_repo(&repo_path, &absolute)?;
+    stage_path(&repo, rel, &absolute)?;
+    emit_status(&app, &repo_id, &repo_path);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn git_stage_all(
+    app: AppHandle,
+    state: State<GitManagerState>,
+    repo_id: String,
+) -> Result<(), String> {
+    let (repo, repo_path) = open_tracked_repo(&state, &repo_id)?;
+    let status = compute_repo_status(&repo_id, &repo_path)?;
+    for file in status.unstaged.iter().chain(status.untracked.iter()) {
+        let absolute = PathBuf::from(file.path.as_ref());
+        let rel = relative_to_repo(&repo_path, &absolute)?;
+        stage_path(&repo, rel, &absolute)?;
+    }
+    emit_status(&app, &repo_id, &repo_path);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn git_unstage_file(
+    app: AppHandle,
+    state: State<GitManagerState>,
+    repo_id: String,
+    path: String,
+) -> Result<(), String> {
+    let (repo, repo_path) = open_tracked_repo(&state, &repo_id)?;
+    let absolute = PathBuf::from(&path);
+    let rel = relative_to_repo(&repo_path, &absolute)?;
+    let head_commit = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+    repo.reset_default(
+        head_commit.as_ref().map(|c| c.as_object()),
+        [rel.to_string_lossy().into_owned()],
+    )
+    .map_err(|e| e.to_string())?;
+    emit_status(&app, &repo_id, &repo_path);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn git_unstage_all(
+    app: AppHandle,
+    state: State<GitManagerState>,
+    repo_id: String,
+) -> Result<(), String> {
+    let (repo, repo_path) = open_tracked_repo(&state, &repo_id)?;
+    let status = compute_repo_status(&repo_id, &repo_path)?;
+    let head_commit = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+    let paths: Vec<String> = status
+        .staged
+        .iter()
+        .filter_map(|f| {
+            let absolute = PathBuf::from(f.path.as_ref());
+            relative_to_repo(&repo_path, &absolute)
+                .ok()
+                .map(|r| r.to_string_lossy().into_owned())
+        })
+        .collect();
+    if !paths.is_empty() {
+        repo.reset_default(head_commit.as_ref().map(|c| c.as_object()), paths)
+            .map_err(|e| e.to_string())?;
+    }
+    emit_status(&app, &repo_id, &repo_path);
+    Ok(())
+}
+
+fn discard_path(repo: &Repository, rel: &Path, absolute: &Path) -> Result<(), String> {
+    let status = repo.status_file(rel).map_err(|e| e.to_string())?;
+    if status.is_wt_new() && !status.is_index_new() {
+        std::fs::remove_file(absolute).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    let mut checkout = CheckoutBuilder::new();
+    checkout.force();
+    checkout.path(rel.to_string_lossy().into_owned());
+    repo.checkout_index(None, Some(&mut checkout))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn git_discard_file(
+    app: AppHandle,
+    state: State<GitManagerState>,
+    repo_id: String,
+    path: String,
+) -> Result<(), String> {
+    let (repo, repo_path) = open_tracked_repo(&state, &repo_id)?;
+    let absolute = PathBuf::from(&path);
+    let rel = relative_to_repo(&repo_path, &absolute)?;
+    discard_path(&repo, rel, &absolute)?;
+    emit_status(&app, &repo_id, &repo_path);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn git_discard_all(
+    app: AppHandle,
+    state: State<GitManagerState>,
+    repo_id: String,
+) -> Result<(), String> {
+    let (repo, repo_path) = open_tracked_repo(&state, &repo_id)?;
+    let status = compute_repo_status(&repo_id, &repo_path)?;
+    for file in status.unstaged.iter().chain(status.untracked.iter()) {
+        let absolute = PathBuf::from(file.path.as_ref());
+        let rel = relative_to_repo(&repo_path, &absolute)?;
+        discard_path(&repo, rel, &absolute)?;
+    }
+    emit_status(&app, &repo_id, &repo_path);
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitResult {
+    pub oid: Box<str>,
+}
+
+#[tauri::command]
+pub fn git_commit(
+    app: AppHandle,
+    state: State<GitManagerState>,
+    repo_id: String,
+    message: String,
+) -> Result<CommitResult, String> {
+    if message.trim().is_empty() {
+        return Err("Commit message cannot be empty.".to_string());
+    }
+    let (repo, repo_path) = open_tracked_repo(&state, &repo_id)?;
+
+    let mut index = repo.index().map_err(|e| e.to_string())?;
+    let tree_oid = index.write_tree().map_err(|e| e.to_string())?;
+    let tree = repo.find_tree(tree_oid).map_err(|e| e.to_string())?;
+
+    let parent_commit = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+    if let Some(parent) = &parent_commit {
+        if parent.tree_id() == tree_oid {
+            return Err("Nothing staged to commit.".to_string());
+        }
+    }
+
+    let signature = repo.signature().map_err(|e| e.to_string())?;
+    let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
+    let oid = repo
+        .commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            &message,
+            &tree,
+            &parents,
+        )
+        .map_err(|e| e.to_string())?;
+
+    emit_status(&app, &repo_id, &repo_path);
+    Ok(CommitResult {
+        oid: oid.to_string().into_boxed_str(),
+    })
 }
