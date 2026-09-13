@@ -33,7 +33,10 @@
 
 <div class="task-manager">
   <p class="summary">
-    {processMonitorStore.processes.length} process{processMonitorStore.processes.length === 1 ? "" : "es"}
+    {processMonitorStore.processes.length} process{processMonitorStore.processes
+      .length === 1
+      ? ""
+      : "es"}
     &middot; {formatMemory(totalMemory)} total
   </p>
 
@@ -55,11 +58,16 @@
           {labelFor(proc.kind, proc.id, proc.label)}
           <span class="pid">PID {proc.pid}</span>
         </span>
-        <span class="col-mem" role="cell">{formatMemory(proc.memoryBytes)}</span>
+        <span class="col-mem" role="cell">{formatMemory(proc.memoryBytes)}</span
+        >
         <span class="col-cpu" role="cell">{proc.cpuPercent.toFixed(1)}%</span>
         <span class="col-action" role="cell">
           {#if proc.kind !== "main"}
-            <button class="kill-btn" title="End process" onclick={() => handleKill(proc.pid)}>&times;</button>
+            <button
+              class="kill-btn"
+              title="End process"
+              onclick={() => handleKill(proc.pid)}>&times;</button
+            >
           {/if}
         </span>
       </div>
@@ -149,7 +157,7 @@
     width: 16px;
     height: 16px;
     line-height: 1;
-    border-radius: 3px;
+    border-radius: 4px;
     color: var(--color-text-muted);
     cursor: pointer;
   }

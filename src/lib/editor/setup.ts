@@ -1,6 +1,5 @@
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
-  EditorView,
   keymap,
   lineNumbers,
   highlightActiveLine,
@@ -34,6 +33,7 @@ import {
   selectNextOccurrence,
 } from "@codemirror/search";
 import { closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap } from "@codemirror/autocomplete";
+import { lintGutter, lintKeymap } from "@codemirror/lint";
 import type { Theme } from "./themes/types";
 import { buildCmTheme } from "./themeEngine";
 import { searchExtension } from "./search.svelte";
@@ -44,6 +44,8 @@ import indentationFolding from "./indentation-folding";
 import { colorChips } from "./color-chip";
 import { emmetExpandCommand } from "./emmet";
 import { extensionOf } from "$lib/utils/fileIcons";
+import { lspDiagnostics } from "$lib/lsp/diagnostics";
+import { pathToFileUri } from "$lib/lsp/uri";
 
 /**
  * Holds the theme's CodeMirror extension (chrome + syntax highlighting)
@@ -59,11 +61,13 @@ export const themeCompartment = new Compartment();
 
 /**
  * This deliberately mirrors CodeMirror's own `basicSetup` ingredient list
- * (see the `codemirror` package's doc comment) minus `@codemirror/lint` —
- * there's no LSP yet to feed it, so pulling in the lint package now would
- * just be unused weight. Hand-picking these individually (rather than
- * depending on the `codemirror` meta-package) also means we control exactly
- * what ships, and can layer our own theme + a real save keybinding on top.
+ * (see the `codemirror` package's doc comment). Hand-picking these
+ * individually (rather than depending on the `codemirror` meta-package)
+ * means we control exactly what ships, and can layer our own theme + a
+ * real save keybinding on top. `@codemirror/lint` — omitted from
+ * `basicSetup` upstream — is included here directly via the per-file
+ * `lspDiagnostics()` extension below, now that there's a real LSP backend
+ * to feed it.
  *
  * Beyond that base set, this also includes the extra editing features
  * layered on top of the original scaffold: multi-theme support (via
@@ -73,14 +77,18 @@ export const themeCompartment = new Compartment();
  * languages this app currently ships), inline color swatches, and a
  * custom find/replace panel (`search.ts` + `SearchPanel.svelte`) in place
  * of CodeMirror's default DOM-built one, so it can match the app's design
- * system.
+ * system, and (when `filePath` is given) live diagnostics from the LSP
+ * backend — see lsp/diagnostics.ts for why this is a *push* model (Rust
+ * emits events as the server publishes them) bridged onto @codemirror/lint's
+ * *pull* API, rather than the lint package's default polling behavior.
  *
  * `filePath` (optional — omitted for e.g. an unsaved/untitled buffer) is
- * only used to pick an extension-appropriate Tab behavior: Emmet-expand
- * for markup/stylesheet files, ordinary indent everywhere else. Snippets
- * are attached separately, per-language, in languages.ts — they need a
- * loaded `Language` instance to hang off of, which isn't available yet at
- * this point for a freshly-opened tab.
+ * used both to pick an extension-appropriate Tab behavior (Emmet-expand
+ * for markup/stylesheet files, ordinary indent everywhere else) and to
+ * fix this tab's diagnostics linter to its own file URI. Snippets are
+ * attached separately, per-language, in languages.ts — they need a loaded
+ * `Language` instance to hang off of, which isn't available yet at this
+ * point for a freshly-opened tab.
  */
 export function baseExtensions(onSave: () => void, initialTheme: Theme, filePath?: string): Extension[] {
   const emmetExpand = filePath ? emmetExpandCommand(extensionOf(filePath)) : null;
@@ -108,7 +116,9 @@ export function baseExtensions(onSave: () => void, initialTheme: Theme, filePath
     tagAutoRename(),
     indentationFolding,
     colorChips(),
+    lintGutter(),
     themeCompartment.of(buildCmTheme(initialTheme)),
+    ...(filePath ? [lspDiagnostics(pathToFileUri(filePath))] : []),
     keymap.of([
       {
         key: "Mod-s",
@@ -130,6 +140,7 @@ export function baseExtensions(onSave: () => void, initialTheme: Theme, filePath
       ...historyKeymap,
       ...foldKeymap,
       ...completionKeymap,
+      ...lintKeymap,
       // Tried before `indentWithTab` so an Emmet-expandable file gets a
       // real expansion on Tab when the cursor sits after a valid
       // abbreviation; `emmetExpand` itself returns false (falling through

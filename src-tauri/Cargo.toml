@@ -29,4 +29,7 @@ ignore = "0.4.33"
 portable-pty = "0.9.0"
 git2 = "0.21.0"
 sysinfo = "0.38.4"
+lsp-types = "0.97.0"
+tokio = { version = "1.53.1", features = ["macros", "process", "time", "io-util", "rt", "sync"] }
+regex = "1.13.1"
 

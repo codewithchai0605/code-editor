@@ -15,6 +15,7 @@
     if (container && tab.cmState) {
       view = new EditorView({ state: tab.cmState, parent: container });
       editorStore.registerActiveView(view);
+      editorStore.applyPendingReveal(view);
       view.focus();
     }
     return () => {
@@ -35,6 +36,7 @@
       editorStore.suppressDirtyTracking = true;
       view.setState(tab.cmState);
       editorStore.suppressDirtyTracking = false;
+      editorStore.applyPendingReveal(view);
       view.focus();
     }
   });

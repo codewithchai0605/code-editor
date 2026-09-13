@@ -11,3 +11,5 @@ pub mod fs;
 pub mod git;
 pub mod process_monitor;
 pub mod pty;
+pub mod lsp;
+pub mod search;

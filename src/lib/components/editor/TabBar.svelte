@@ -1,5 +1,6 @@
 <script lang="ts">
   import { editorStore } from "$lib/stores/editor.svelte";
+  import { diffTabStore } from "$lib/stores/diffTab.svelte";
   import { baseName } from "$lib/utils/path";
   import { fileIconColor } from "$lib/utils/fileIcons";
 
@@ -10,28 +11,40 @@
     }
   }
 
-  function onKeydown(e: KeyboardEvent, path: string) {
+  function onKeydown(e: KeyboardEvent, activate: () => void) {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      editorStore.activate(path);
+      activate();
     }
+  }
+
+  function activateFileTab(path: string) {
+    diffTabStore.deactivate();
+    editorStore.activate(path);
   }
 </script>
 
 <div class="tab-bar" role="tablist" aria-label="Open files">
   {#each editorStore.tabs as tab (tab.path)}
+    {@const isActive =
+      !diffTabStore.activeId && tab.path === editorStore.activePath}
     <div
       class="tab"
-      class:active={tab.path === editorStore.activePath}
+      class:active={isActive}
       role="tab"
-      aria-selected={tab.path === editorStore.activePath}
+      aria-selected={isActive}
       tabindex="0"
       title={tab.path}
-      onclick={() => editorStore.activate(tab.path)}
-      onkeydown={(e) => onKeydown(e, tab.path)}
+      onclick={() => activateFileTab(tab.path)}
+      onkeydown={(e) => onKeydown(e, () => activateFileTab(tab.path))}
       onauxclick={(e) => onAuxClick(e, tab.path)}
     >
-      <span class="dot" style:background={tab.kind === "text" ? fileIconColor(tab.path) : "var(--color-text-faint)"}></span>
+      <span
+        class="dot"
+        style:background={tab.kind === "text"
+          ? fileIconColor(tab.path)
+          : "var(--color-text-faint)"}
+      ></span>
       <span class="name">{baseName(tab.path)}</span>
       {#if tab.isDirty}<span class="dirty" aria-hidden="true"></span>{/if}
       <button
@@ -40,6 +53,42 @@
         onclick={(e) => {
           e.stopPropagation();
           editorStore.requestClose(tab.path);
+        }}
+      >
+        &times;
+      </button>
+    </div>
+  {/each}
+  {#each diffTabStore.tabs as diffTab (diffTab.id)}
+    {@const isActive = diffTabStore.activeId === diffTab.id}
+    <div
+      class="tab diff-tab"
+      class:active={isActive}
+      role="tab"
+      aria-selected={isActive}
+      tabindex="0"
+      title={diffTab.path}
+      onclick={() => diffTabStore.setActive(diffTab.id)}
+      onkeydown={(e) => onKeydown(e, () => diffTabStore.setActive(diffTab.id))}
+    >
+      <svg
+        class="diff-icon"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+      >
+        <circle cx="4.5" cy="3.5" r="1.5" />
+        <circle cx="4.5" cy="12.5" r="1.5" />
+        <path d="M4.5 5v6" />
+      </svg>
+      <span class="name">{diffTab.title}</span>
+      <button
+        class="close"
+        aria-label="Close {diffTab.title}"
+        onclick={(e) => {
+          e.stopPropagation();
+          diffTabStore.close(diffTab.id);
         }}
       >
         &times;
@@ -84,6 +133,12 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
+  }
+  .diff-icon {
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    color: var(--color-text-faint);
   }
   .name {
     overflow: hidden;

@@ -1,7 +1,8 @@
 import type { Extension } from "@codemirror/state";
-import { LanguageSupport } from "@codemirror/language";
+import { LanguageDescription, LanguageSupport } from "@codemirror/language";
 import { extensionOf } from "$lib/utils/fileIcons";
 import { snippetSourceFor } from "./snippets";
+import { languages } from "@codemirror/language-data";
 
 type LanguageLoader = () => Promise<Extension>;
 
@@ -24,6 +25,82 @@ function languageKeyFor(fileName: string): string {
   return extensionOf(fileName);
 }
 
+function createLanguageLoader(name: string, lang: LanguageDescription) {
+  const normalizedName =  name.trim().toLowerCase();
+
+  switch (normalizedName) {
+    case "javascript":
+      return async () => {
+        const { javascript } = await import("@codemirror/lang-javascript");
+        return javascript({ jsx: true });
+      };
+
+    case "html":
+      return async () => {
+        const { html } = await import("@codemirror/lang-html");
+        return html({ autoCloseTags: true });
+      };
+
+    case "xml":
+      return async () => {
+        const { xml } = await import("@codemirror/lang-xml");
+        return xml({ autoCloseTags: true });
+      };
+
+    case "vue":
+      return async () => {
+        const [{ vue }, { html }] = await Promise.all([
+          import("@codemirror/lang-vue"),
+          import("@codemirror/lang-html"),
+        ]);
+        return vue({
+          base: html({ autoCloseTags: true }),
+        });
+      };
+
+    case "angular":
+      return async () => {
+        const [{ angular }, { html }] = await Promise.all([
+          import("@codemirror/lang-angular"),
+          import("@codemirror/lang-html"),
+        ]);
+        return angular({
+          base: html({
+            autoCloseTags: true,
+            selfClosingTags: true,
+          }),
+        });
+      };
+
+    case "php":
+      return async () => {
+        const [{ php }, { html }] = await Promise.all([
+          import("@codemirror/lang-php"),
+          import("@codemirror/lang-html"),
+        ]);
+        const htmlSupport = html({
+          autoCloseTags: true,
+          matchClosingTags: false,
+        });
+        return [
+          php({ baseLanguage: htmlSupport.language }),
+          htmlSupport.support,
+        ];
+      };
+  }
+
+  return typeof lang.load === "function" ? () => lang.load!() : null;
+}
+
+const languageLoaders = () => {
+  const loaders = {};
+  for (const lang of languages as readonly LanguageDescription[]) {
+    const name = String(lang?.name || "").trim();
+    if (!name) continue;
+
+  }
+  return null;
+}
 /**
  * Every loader is a dynamic import, so the language parser for a file type
  * only ever gets fetched/parsed once a file of that type is actually

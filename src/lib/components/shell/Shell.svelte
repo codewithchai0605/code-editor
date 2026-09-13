@@ -6,6 +6,7 @@
   import { paletteState } from "$lib/stores/palette.svelte";
   import { themeStore } from "$lib/stores/theme.svelte";
   import { markdownPreviewStore } from "$lib/stores/markdownPreview.svelte";
+  import { workspaceSearchStore } from "$lib/stores/workspaceSearch.svelte";
   import { registerCoreCommands } from "$lib/commands/coreCommands";
   import ActivityBar from "./ActivityBar.svelte";
   import Sidebar from "./Sidebar.svelte";
@@ -14,14 +15,17 @@
   import StatusBar from "./StatusBar.svelte";
   import ResizeHandle from "./ResizeHandle.svelte";
   import PaletteHost from "./PaletteHost.svelte";
+  import ToastHost from "./ToastHost.svelte";
 
   onMount(() => {
     themeStore.applyInitial();
 
     const unregisterCommands = registerCoreCommands();
     workspace.initFsWatcherListener();
+    workspaceSearchStore.initListeners();
 
-    const updateSize = () => layout.setWindowSize(window.innerWidth, window.innerHeight);
+    const updateSize = () =>
+      layout.setWindowSize(window.innerWidth, window.innerHeight);
     updateSize();
     window.addEventListener("resize", updateSize);
 
@@ -47,6 +51,9 @@
       } else if (e.key.toLowerCase() === "v" && e.shiftKey) {
         e.preventDefault();
         markdownPreviewStore.toggle();
+      } else if (e.key.toLowerCase() === "f" && e.shiftKey) {
+        e.preventDefault();
+        if (workspace.rootPath) layout.setActiveView("search");
       } else if (e.key.toLowerCase() === "p") {
         e.preventDefault();
         if (workspace.rootPath) paletteState.toggle("quickOpen");
@@ -68,13 +75,19 @@
 
     {#if layout.effectiveSidebarOpen}
       <Sidebar />
-      <ResizeHandle orientation="vertical" onDrag={(dx) => layout.setSidebarWidth(layout.sidebarWidth + dx)} />
+      <ResizeHandle
+        orientation="vertical"
+        onDrag={(dx) => layout.setSidebarWidth(layout.sidebarWidth + dx)}
+      />
     {/if}
 
     <div class="main-column">
       <EditorArea />
       {#if layout.panelOpen}
-        <ResizeHandle orientation="horizontal" onDrag={(dy) => layout.setPanelHeight(layout.panelHeight - dy)} />
+        <ResizeHandle
+          orientation="horizontal"
+          onDrag={(dy) => layout.setPanelHeight(layout.panelHeight - dy)}
+        />
       {/if}
       <!-- Always mounted (visibility toggled via CSS inside Panel itself)
            rather than `{#if layout.panelOpen}` — every terminal session's
@@ -90,6 +103,7 @@
 </div>
 
 <PaletteHost />
+<ToastHost />
 
 <style>
   .shell {

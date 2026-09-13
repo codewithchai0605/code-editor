@@ -38,6 +38,17 @@ export function gitStatus(repoId: string): Promise<RepoStatus> {
   return invoke<RepoStatus>("git_status", { repoId });
 }
 
+export interface DiffContent {
+  oldText: string;
+  newText: string;
+  oldLabel: string;
+  newLabel: string;
+}
+
+export function gitDiff(repoId: string, path: string, staged: boolean): Promise<DiffContent> {
+  return invoke<DiffContent>("git_diff", { repoId, path, staged });
+}
+
 export function gitStageFile(repoId: string, path: string): Promise<void> {
   return invoke("git_stage_file", { repoId, path });
 }

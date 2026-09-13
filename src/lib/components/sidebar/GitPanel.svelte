@@ -1,7 +1,10 @@
 <script lang="ts">
   import { gitStore } from "$lib/stores/git.svelte";
   import { editorStore } from "$lib/stores/editor.svelte";
+  import { diffTabStore } from "$lib/stores/diffTab.svelte";
+  import { toastStore } from "$lib/stores/toast.svelte";
   import { baseName, parentOf } from "$lib/utils/path";
+  import { fileIconColor } from "$lib/utils/fileIcons";
   import type { GitFileEntry } from "$lib/api/git";
   import DiscardConfirmDialog from "./DiscardConfirmDialog.svelte";
 
@@ -30,8 +33,22 @@
   let commitMessages = $state<Record<string, string>>({});
   let commitErrors = $state<Record<string, string>>({});
 
-  function openFile(path: string) {
-    void editorStore.open(path);
+  /** Conflicted files open as a plain file (so the person can edit the
+   *  conflict markers directly) — everything else opens its diff, matching
+   *  VS Code's own Source Control click behavior. A 3-way merge-specific
+   *  view is future work; plain editing is the reasonable fallback until
+   *  then, same as how a conflict is actually resolved either way. */
+  function openRow(
+    repoId: string,
+    path: string,
+    staged: boolean,
+    status: GitFileEntry["status"],
+  ) {
+    if (status === "conflicted") {
+      void editorStore.open(path);
+    } else {
+      void diffTabStore.open(repoId, path, staged);
+    }
   }
 
   function relativeDir(path: string, repoPath: string): string {
@@ -48,9 +65,10 @@
   async function handleCommit(repoId: string) {
     const message = commitMessages[repoId] ?? "";
     try {
-      await gitStore.commit(repoId, message);
+      const result = await gitStore.commit(repoId, message);
       commitMessages = { ...commitMessages, [repoId]: "" };
       commitErrors = { ...commitErrors, [repoId]: "" };
+      toastStore.success(`Committed ${result.oid.slice(0, 7)}`);
     } catch (err) {
       commitErrors = {
         ...commitErrors,
@@ -60,18 +78,63 @@
   }
 </script>
 
-<div class="git-panel">
-  {#if gitStore.lastError}
-    <p class="error-banner">{gitStore.lastError}</p>
-  {/if}
+{#snippet plusIcon()}
+  <svg
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.6"
+    stroke-linecap="round"
+  >
+    <path d="M8 3v10M3 8h10" />
+  </svg>
+{/snippet}
+{#snippet minusIcon()}
+  <svg
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.6"
+    stroke-linecap="round"
+  >
+    <path d="M3 8h10" />
+  </svg>
+{/snippet}
+{#snippet discardIcon()}
+  <svg
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.6"
+    stroke-linecap="round"
+  >
+    <path d="M4 4l8 8M12 4l-8 8" />
+  </svg>
+{/snippet}
+{#snippet refreshIcon()}
+  <svg
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M13 3v4h-4" />
+    <path d="M3 13v-4h4" />
+    <path d="M3.5 8a4.5 4.5 0 0 1 7.5-3.2l2 2" />
+    <path d="M12.5 8a4.5 4.5 0 0 1-7.5 3.2l-2-2" />
+  </svg>
+{/snippet}
 
+<div class="git-panel">
   {#if !gitStore.hasAnyRepo}
     <p class="placeholder">No git repository detected in this workspace.</p>
   {:else}
     {#each gitStore.repos as repo (repo.id)}
       {@const status = gitStore.statusOf(repo.id)}
       {@const isCollapsed = collapsed.has(repo.id)}
-      {@const canStageOrDiscard = status
+      {@const changeCount = status
         ? status.unstaged.length + status.untracked.length
         : 0}
       <section class="repo">
@@ -104,197 +167,231 @@
             title="Refresh"
             onclick={() => gitStore.refreshRepo(repo.id)}
           >
-            <svg
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-            >
-              <path d="M13 3v4h-4M3 13v-4h4" />
-              <path
-                d="M3.5 8a4.5 4.5 0 0 1 7.5-3.2l2 2M12.5 8a4.5 4.5 0 0 1-7.5 3.2l-2-2"
-              />
-            </svg>
+            {@render refreshIcon()}
           </button>
         </div>
 
-        {#if !isCollapsed && status}
-          <div class="commit-box">
-            <textarea
-              placeholder="Message ({repo.name})"
-              rows="2"
-              value={commitMessages[repo.id] ?? ""}
-              oninput={(e) =>
-                (commitMessages = {
-                  ...commitMessages,
-                  [repo.id]: e.currentTarget.value,
-                })}
-            ></textarea>
-            {#if commitErrors[repo.id]}
-              <p class="commit-error">{commitErrors[repo.id]}</p>
+        {#if !isCollapsed}
+          {#if !status}
+            <p class="loading">Loading…</p>
+          {:else}
+            <div class="commit-box">
+              <textarea
+                placeholder="Message ({repo.name})"
+                rows="2"
+                value={commitMessages[repo.id] ?? ""}
+                oninput={(e) =>
+                  (commitMessages = {
+                    ...commitMessages,
+                    [repo.id]: e.currentTarget.value,
+                  })}
+              ></textarea>
+              {#if commitErrors[repo.id]}
+                <p class="commit-error">{commitErrors[repo.id]}</p>
+              {/if}
+              <button
+                class="commit-btn"
+                disabled={status.staged.length === 0 ||
+                  !(commitMessages[repo.id] ?? "").trim()}
+                onclick={() => handleCommit(repo.id)}
+              >
+                Commit ({status.staged.length})
+              </button>
+            </div>
+
+            {#if status.conflicted.length}
+              <div class="group">
+                <p class="group-title">Merge Conflicts</p>
+                {#each status.conflicted as file (file.path)}
+                  <div class="file-row">
+                    <button
+                      class="file-open"
+                      onclick={() =>
+                        openRow(repo.id, file.path, false, file.status)}
+                    >
+                      <span
+                        class="file-dot"
+                        style:background={fileIconColor(file.path)}
+                      ></span>
+                      <span class="file-name">{baseName(file.path)}</span>
+                      {#if relativeDir(file.path, repo.path)}
+                        <span class="file-dir"
+                          >{relativeDir(file.path, repo.path)}</span
+                        >
+                      {/if}
+                    </button>
+                    <span class="badge" data-status={file.status}
+                      >{GIT_BADGE[file.status]}</span
+                    >
+                  </div>
+                {/each}
+              </div>
             {/if}
-            <button
-              class="commit-btn"
-              disabled={status.staged.length === 0 ||
-                !(commitMessages[repo.id] ?? "").trim()}
-              onclick={() => handleCommit(repo.id)}
-            >
-              Commit ({status.staged.length})
-            </button>
-          </div>
 
-          {#if status.conflicted.length}
-            <div class="group">
-              <p class="group-title">Merge Conflicts</p>
-              {#each status.conflicted as file (file.path)}
-                <div class="file-row">
-                  <button class="file-open" onclick={() => openFile(file.path)}>
-                    <span class="file-name">{baseName(file.path)}</span>
-                    {#if relativeDir(file.path, repo.path)}
-                      <span class="file-dir"
-                        >{relativeDir(file.path, repo.path)}</span
-                      >
-                    {/if}
-                  </button>
-                  <span class="badge" data-status={file.status}
-                    >{GIT_BADGE[file.status]}</span
+            {#if status.staged.length}
+              <div class="group">
+                <div class="group-header">
+                  <p class="group-title">
+                    Staged Changes ({status.staged.length})
+                  </p>
+                  <button
+                    class="icon-btn"
+                    title="Unstage All"
+                    onclick={() => gitStore.unstageAll(repo.id)}
+                    >{@render minusIcon()}</button
                   >
                 </div>
-              {/each}
-            </div>
-          {/if}
-
-          {#if status.staged.length}
-            <div class="group">
-              <div class="group-header">
-                <p class="group-title">
-                  Staged Changes ({status.staged.length})
-                </p>
-                <button
-                  class="icon-btn"
-                  title="Unstage All"
-                  onclick={() => gitStore.unstageAll(repo.id)}>−</button
-                >
+                {#each status.staged as file (file.path)}
+                  <div class="file-row">
+                    <button
+                      class="file-open"
+                      onclick={() =>
+                        openRow(repo.id, file.path, true, file.status)}
+                    >
+                      <span
+                        class="file-dot"
+                        style:background={fileIconColor(file.path)}
+                      ></span>
+                      <span class="file-name">{baseName(file.path)}</span>
+                      {#if relativeDir(file.path, repo.path)}
+                        <span class="file-dir"
+                          >{relativeDir(file.path, repo.path)}</span
+                        >
+                      {/if}
+                    </button>
+                    <button
+                      class="row-action"
+                      title="Unstage"
+                      onclick={() => gitStore.unstageFile(repo.id, file.path)}
+                      >{@render minusIcon()}</button
+                    >
+                    <span class="badge" data-status={file.status}
+                      >{GIT_BADGE[file.status]}</span
+                    >
+                  </div>
+                {/each}
               </div>
-              {#each status.staged as file (file.path)}
-                <div class="file-row">
-                  <button class="file-open" onclick={() => openFile(file.path)}>
-                    <span class="file-name">{baseName(file.path)}</span>
-                    {#if relativeDir(file.path, repo.path)}
-                      <span class="file-dir"
-                        >{relativeDir(file.path, repo.path)}</span
-                      >
-                    {/if}
-                  </button>
-                  <button
-                    class="row-action"
-                    title="Unstage"
-                    onclick={() => gitStore.unstageFile(repo.id, file.path)}
-                    >−</button
-                  >
-                  <span class="badge" data-status={file.status}
-                    >{GIT_BADGE[file.status]}</span
-                  >
-                </div>
-              {/each}
-            </div>
-          {/if}
+            {/if}
 
-          {#if status.unstaged.length}
-            <div class="group">
-              <div class="group-header">
-                <p class="group-title">Changes ({status.unstaged.length})</p>
-                <button
-                  class="icon-btn"
-                  title="Stage All"
-                  onclick={() => gitStore.stageAll(repo.id)}>+</button
-                >
-                <button
-                  class="icon-btn"
-                  title="Discard All"
-                  onclick={() => gitStore.requestDiscardAll(repo.id)}>⨯</button
-                >
-              </div>
-              {#each status.unstaged as file (file.path)}
-                <div class="file-row">
-                  <button class="file-open" onclick={() => openFile(file.path)}>
-                    <span class="file-name">{baseName(file.path)}</span>
-                    {#if relativeDir(file.path, repo.path)}
-                      <span class="file-dir"
-                        >{relativeDir(file.path, repo.path)}</span
-                      >
-                    {/if}
-                  </button>
-                  <button
-                    class="row-action"
-                    title="Discard"
-                    onclick={() =>
-                      gitStore.requestDiscardFile(repo.id, file.path)}>⨯</button
-                  >
-                  <button
-                    class="row-action"
-                    title="Stage"
-                    onclick={() => gitStore.stageFile(repo.id, file.path)}
-                    >+</button
-                  >
-                  <span class="badge" data-status={file.status}
-                    >{GIT_BADGE[file.status]}</span
-                  >
-                </div>
-              {/each}
-            </div>
-          {/if}
-
-          {#if status.untracked.length}
-            <div class="group">
-              <div class="group-header">
-                <p class="group-title">Untracked ({status.untracked.length})</p>
-                {#if !status.unstaged.length}
+            {#if status.unstaged.length}
+              <div class="group">
+                <div class="group-header">
+                  <p class="group-title">Changes ({status.unstaged.length})</p>
                   <button
                     class="icon-btn"
                     title="Stage All"
-                    onclick={() => gitStore.stageAll(repo.id)}>+</button
+                    onclick={() => gitStore.stageAll(repo.id)}
+                    >{@render plusIcon()}</button
                   >
                   <button
                     class="icon-btn"
                     title="Discard All"
                     onclick={() => gitStore.requestDiscardAll(repo.id)}
-                    >⨯</button
-                  >
-                {/if}
-              </div>
-              {#each status.untracked as file (file.path)}
-                <div class="file-row">
-                  <button class="file-open" onclick={() => openFile(file.path)}>
-                    <span class="file-name">{baseName(file.path)}</span>
-                    {#if relativeDir(file.path, repo.path)}
-                      <span class="file-dir"
-                        >{relativeDir(file.path, repo.path)}</span
-                      >
-                    {/if}
-                  </button>
-                  <button
-                    class="row-action"
-                    title="Discard"
-                    onclick={() =>
-                      gitStore.requestDiscardFile(repo.id, file.path)}>⨯</button
-                  >
-                  <button
-                    class="row-action"
-                    title="Stage"
-                    onclick={() => gitStore.stageFile(repo.id, file.path)}
-                    >+</button
-                  >
-                  <span class="badge" data-status={file.status}
-                    >{GIT_BADGE[file.status]}</span
+                    >{@render discardIcon()}</button
                   >
                 </div>
-              {/each}
-            </div>
-          {/if}
+                {#each status.unstaged as file (file.path)}
+                  <div class="file-row">
+                    <button
+                      class="file-open"
+                      onclick={() =>
+                        openRow(repo.id, file.path, false, file.status)}
+                    >
+                      <span
+                        class="file-dot"
+                        style:background={fileIconColor(file.path)}
+                      ></span>
+                      <span class="file-name">{baseName(file.path)}</span>
+                      {#if relativeDir(file.path, repo.path)}
+                        <span class="file-dir"
+                          >{relativeDir(file.path, repo.path)}</span
+                        >
+                      {/if}
+                    </button>
+                    <button
+                      class="row-action"
+                      title="Discard"
+                      onclick={() =>
+                        gitStore.requestDiscardFile(repo.id, file.path)}
+                      >{@render discardIcon()}</button
+                    >
+                    <button
+                      class="row-action"
+                      title="Stage"
+                      onclick={() => gitStore.stageFile(repo.id, file.path)}
+                      >{@render plusIcon()}</button
+                    >
+                    <span class="badge" data-status={file.status}
+                      >{GIT_BADGE[file.status]}</span
+                    >
+                  </div>
+                {/each}
+              </div>
+            {/if}
 
-          {#if !status.conflicted.length && !status.staged.length && !canStageOrDiscard}
-            <p class="clean">No changes.</p>
+            {#if status.untracked.length}
+              <div class="group">
+                <div class="group-header">
+                  <p class="group-title">
+                    Untracked ({status.untracked.length})
+                  </p>
+                  {#if !status.unstaged.length}
+                    <button
+                      class="icon-btn"
+                      title="Stage All"
+                      onclick={() => gitStore.stageAll(repo.id)}
+                      >{@render plusIcon()}</button
+                    >
+                    <button
+                      class="icon-btn"
+                      title="Discard All"
+                      onclick={() => gitStore.requestDiscardAll(repo.id)}
+                      >{@render discardIcon()}</button
+                    >
+                  {/if}
+                </div>
+                {#each status.untracked as file (file.path)}
+                  <div class="file-row">
+                    <button
+                      class="file-open"
+                      onclick={() =>
+                        openRow(repo.id, file.path, false, file.status)}
+                    >
+                      <span
+                        class="file-dot"
+                        style:background={fileIconColor(file.path)}
+                      ></span>
+                      <span class="file-name">{baseName(file.path)}</span>
+                      {#if relativeDir(file.path, repo.path)}
+                        <span class="file-dir"
+                          >{relativeDir(file.path, repo.path)}</span
+                        >
+                      {/if}
+                    </button>
+                    <button
+                      class="row-action"
+                      title="Discard"
+                      onclick={() =>
+                        gitStore.requestDiscardFile(repo.id, file.path)}
+                      >{@render discardIcon()}</button
+                    >
+                    <button
+                      class="row-action"
+                      title="Stage"
+                      onclick={() => gitStore.stageFile(repo.id, file.path)}
+                      >{@render plusIcon()}</button
+                    >
+                    <span class="badge" data-status={file.status}
+                      >{GIT_BADGE[file.status]}</span
+                    >
+                  </div>
+                {/each}
+              </div>
+            {/if}
+
+            {#if !status.conflicted.length && !status.staged.length && !changeCount}
+              <p class="clean">No changes.</p>
+            {/if}
           {/if}
         {/if}
       </section>
@@ -310,16 +407,14 @@
     flex-direction: column;
     font-size: 12px;
   }
-  .error-banner {
-    color: #f48771;
-    background: rgba(244, 135, 113, 0.1);
-    border-radius: 4px;
-    padding: 6px 8px;
-    margin: 0 0 6px;
-  }
   .placeholder {
     color: var(--color-text-muted);
     padding: 4px 2px;
+  }
+  .loading {
+    color: var(--color-text-faint);
+    padding: 3px 2px 3px 20px;
+    margin: 4px 0;
   }
   .repo {
     display: flex;
@@ -341,6 +436,10 @@
     padding: 3px 0;
     font-weight: 600;
     text-align: left;
+    border-radius: 4px;
+  }
+  .repo-toggle:hover {
+    background: rgba(255, 255, 255, 0.08);
   }
   .chevron {
     width: 12px;
@@ -401,15 +500,13 @@
   }
   .icon-btn {
     flex-shrink: 0;
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 3px;
+    border-radius: 4px;
     color: var(--color-text-muted);
-    font-size: 13px;
-    line-height: 1;
   }
   .icon-btn:hover {
     background: rgba(255, 255, 255, 0.08);
@@ -445,10 +542,10 @@
     align-items: center;
     gap: 2px;
     padding: 0 2px 0 20px;
-    border-radius: 3px;
+    border-radius: 4px;
   }
   .file-row:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.08);
   }
   .file-row:hover .row-action {
     display: flex;
@@ -461,6 +558,12 @@
     gap: 6px;
     padding: 3px 0;
     text-align: left;
+  }
+  .file-dot {
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
   }
   .file-name {
     flex-shrink: 0;
@@ -480,18 +583,20 @@
   .row-action {
     display: none;
     flex-shrink: 0;
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
     align-items: center;
     justify-content: center;
-    border-radius: 3px;
+    border-radius: 4px;
     color: var(--color-text-muted);
-    font-size: 13px;
-    line-height: 1;
   }
   .row-action:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.12);
     color: var(--color-text);
+  }
+  .row-action svg {
+    width: 13px;
+    height: 13px;
   }
   .badge {
     flex-shrink: 0;

@@ -1,20 +1,30 @@
 <script lang="ts">
   import { editorStore } from "$lib/stores/editor.svelte";
+  import { diffTabStore } from "$lib/stores/diffTab.svelte";
   import { markdownPreviewStore } from "$lib/stores/markdownPreview.svelte";
   import { extensionOf } from "$lib/utils/fileIcons";
   import TabBar from "$lib/components/editor/TabBar.svelte";
   import TextEditor from "$lib/components/editor/TextEditor.svelte";
+  import DiffView from "$lib/components/editor/DiffView.svelte";
   import MarkdownPreview from "$lib/components/editor/MarkdownPreview.svelte";
   import ImageViewer from "$lib/components/editor/ImageViewer.svelte";
   import AudioViewer from "$lib/components/editor/AudioViewer.svelte";
   import BinaryViewer from "$lib/components/editor/BinaryViewer.svelte";
   import UnsavedChangesDialog from "./UnsavedChangesDialog.svelte";
+  import Breadcrumbs from "./Breadcrumbs.svelte";
 
+  const diffTab = $derived(diffTabStore.activeTab);
   const tab = $derived(editorStore.activeTab);
+  // A diff tab being active takes priority over the underlying file tab —
+  // see diffTab.svelte.ts's own doc comment for why these are two fully
+  // separate stores rather than one unified tab concept.
+  const breadcrumbPath = $derived(diffTab?.path ?? tab?.path);
   const isMarkdown = $derived(
     tab?.kind === "text" && ["md", "markdown"].includes(extensionOf(tab.path)),
   );
-  const showPreview = $derived(isMarkdown && markdownPreviewStore.open && !!tab?.cmState);
+  const showPreview = $derived(
+    isMarkdown && markdownPreviewStore.open && !!tab?.cmState,
+  );
   // Re-derives on every doc change (`tab.cmState` is replaced on each edit —
   // see editor.svelte.ts's syncDoc) — MarkdownPreview.svelte debounces the
   // actual re-render internally, so recomputing this string per keystroke
@@ -23,11 +33,16 @@
 </script>
 
 <section class="editor-area">
-  {#if editorStore.tabs.length > 0}
+  {#if editorStore.tabs.length > 0 || diffTabStore.tabs.length > 0}
     <TabBar />
   {/if}
+  {#if breadcrumbPath}
+    <Breadcrumbs path={breadcrumbPath} />
+  {/if}
 
-  {#if !tab}
+  {#if diffTab}
+    <DiffView tab={diffTab} />
+  {:else if !tab}
     <div class="welcome">
       <h1>Code Editor</h1>
       <p>Open a folder, then click a file to start editing.</p>
@@ -49,7 +64,9 @@
     {#if showPreview}
       <div class="split-view">
         <div class="split-pane"><TextEditor {tab} /></div>
-        <div class="split-pane divider"><MarkdownPreview content={markdownSource} /></div>
+        <div class="split-pane divider">
+          <MarkdownPreview content={markdownSource} />
+        </div>
       </div>
     {:else}
       <TextEditor {tab} />

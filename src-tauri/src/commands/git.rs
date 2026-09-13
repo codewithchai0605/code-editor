@@ -328,6 +328,80 @@ pub fn git_status(state: State<GitManagerState>, repo_id: String) -> Result<Repo
     compute_repo_status(&repo_id, &repo.path)
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffContent {
+    pub old_text: String,
+    pub new_text: String,
+    pub old_label: Box<str>,
+    pub new_label: Box<str>,
+}
+
+fn tree_blob_content(repo: &Repository, tree: &git2::Tree, rel_str: &str) -> Option<String> {
+    let entry = tree.get_path(Path::new(rel_str)).ok()?;
+    let object = entry.to_object(repo).ok()?;
+    let blob = object.as_blob()?;
+    Some(String::from_utf8_lossy(blob.content()).into_owned())
+}
+
+fn index_blob_content(repo: &Repository, index: &git2::Index, rel_str: &str) -> Option<String> {
+    // `Index::get_path` expects forward-slash paths regardless of platform
+    // (verified against git2's own source — `IndexEntry::path` says the
+    // separator is always ASCII `/`), same as `Tree::get_path` above.
+    let entry = index.get_path(Path::new(rel_str), 0)?; // stage 0 = the normal, non-conflicted entry
+    let blob = repo.find_blob(entry.id).ok()?;
+    Some(String::from_utf8_lossy(blob.content()).into_owned())
+}
+
+/// Reads the two sides of a diff for one file — never touches the
+/// filesystem's actual diff/patch machinery, just reads whichever blobs
+/// are relevant and hands both full texts to the frontend, which renders
+/// them with `@codemirror/merge`'s own diffing rather than parsing a unified
+/// patch format.
+///
+/// - Staged diff: HEAD's blob -> the index's blob.
+/// - Unstaged diff: the index's blob -> the working tree file on disk.
+///
+/// An untracked file has no index entry at all, so its "old" side comes
+/// back empty automatically; a deleted file (working tree side gone, or
+/// staged as removed) has its "new" side come back empty the same way —
+/// both fall out of this naturally without special-casing.
+#[tauri::command]
+pub fn git_diff(
+    state: State<GitManagerState>,
+    repo_id: String,
+    path: String,
+    staged: bool,
+) -> Result<DiffContent, String> {
+    let (repo, repo_path) = open_tracked_repo(&state, &repo_id)?;
+    let absolute = PathBuf::from(&path);
+    let rel = relative_to_repo(&repo_path, &absolute)?;
+    let rel_str = rel.to_string_lossy().replace('\\', "/");
+
+    let index = repo.index().map_err(|e| e.to_string())?;
+
+    let (old_text, new_text) = if staged {
+        let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+        let old = head_tree
+            .as_ref()
+            .and_then(|t| tree_blob_content(&repo, t, &rel_str))
+            .unwrap_or_default();
+        let new = index_blob_content(&repo, &index, &rel_str).unwrap_or_default();
+        (old, new)
+    } else {
+        let old = index_blob_content(&repo, &index, &rel_str).unwrap_or_default();
+        let new = std::fs::read_to_string(&absolute).unwrap_or_default();
+        (old, new)
+    };
+
+    Ok(DiffContent {
+        old_text,
+        new_text,
+        old_label: if staged { "HEAD" } else { "Index" }.into(),
+        new_label: if staged { "Staged" } else { "Working Tree" }.into(),
+    })
+}
+
 #[tauri::command]
 pub fn git_unwatch_all(state: State<GitManagerState>) {
     state.repos.lock().unwrap().clear();

@@ -1,9 +1,12 @@
 mod commands;
+mod lsp;
 mod state;
 
 use commands::git::GitManagerState;
-use state::{AppState, ProcessMonitorState, PtyState};
+use state::{AppState, ProcessMonitorState, PtyState, SearchState};
 use tauri::Manager;
+
+use crate::lsp::manager::LspManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -14,6 +17,8 @@ pub fn run() {
         .manage(PtyState::default())
         .manage(ProcessMonitorState::default())
         .manage(GitManagerState::default())
+        .manage(LspManager::default())
+        .manage(SearchState::default())
         .invoke_handler(tauri::generate_handler![
             commands::app::app_version,
             commands::fs::open_workspace,
@@ -34,9 +39,7 @@ pub fn run() {
             commands::pty::close_terminal,
             commands::git::git_list_repos,
             commands::git::git_status,
-            commands::git::git_unwatch_all,
-            commands::git::git_list_repos,
-            commands::git::git_status,
+            commands::git::git_diff,
             commands::git::git_stage_file,
             commands::git::git_stage_all,
             commands::git::git_unstage_file,
@@ -49,6 +52,14 @@ pub fn run() {
             commands::process_monitor::register_process,
             commands::process_monitor::unregister_process,
             commands::process_monitor::kill_process,
+            commands::lsp::lsp_start,
+            commands::lsp::lsp_did_open,
+            commands::lsp::lsp_did_change,
+            commands::lsp::lsp_did_close,
+            commands::lsp::lsp_stop,
+            commands::search::workspace_search,
+            commands::search::stop_workspace_search,
+            commands::search::workspace_replace_all,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

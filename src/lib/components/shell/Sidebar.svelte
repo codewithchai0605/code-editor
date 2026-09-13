@@ -3,6 +3,7 @@
   import FileTree from "$lib/components/explorer/FileTree.svelte";
   import TaskManager from "$lib/components/sidebar/TaskManager.svelte";
   import GitPanel from "$lib/components/sidebar/GitPanel.svelte";
+  import WorkspaceSearchPanel from "$lib/components/sidebar/WorkspaceSearchPanel.svelte";
 
   const titles: Record<string, string> = {
     explorer: "Explorer",
@@ -21,11 +22,12 @@
   <div
     class="sidebar-content"
     class:explorer-mode={layout.activeView === "explorer"}
+    class:search-mode={layout.activeView === "search"}
   >
     {#if layout.activeView === "explorer"}
       <FileTree />
     {:else if layout.activeView === "search"}
-      <p class="placeholder">Workspace search is coming in a later phase.</p>
+      <WorkspaceSearchPanel />
     {:else if layout.activeView === "scm"}
       <GitPanel />
     {:else if layout.activeView === "processes"}
@@ -74,6 +76,9 @@
     padding: 4px 16px 16px;
   }
   .sidebar-content.explorer-mode {
+    overflow: hidden;
+  }
+  .sidebar-content.search-mode {
     overflow: hidden;
   }
   .placeholder {

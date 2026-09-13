@@ -192,7 +192,11 @@ fn start_watcher(app: &AppHandle, state: &State<AppState>, root: &Path) {
     *watcher_slot = None; // drop any previous watcher first
 
     if let Ok(mut debouncer) = debouncer {
-        if debouncer.watcher().watch(root, RecursiveMode::Recursive).is_ok() {
+        if debouncer
+            .watcher()
+            .watch(root, RecursiveMode::Recursive)
+            .is_ok()
+        {
             *watcher_slot = Some(debouncer);
         }
     }
@@ -297,11 +301,16 @@ fn check_conflicts(sources: &[PathBuf], dest_dir: &Path) -> Box<[Box<str>]> {
         .into_boxed_slice()
 }
 
-fn guard_against_self_nesting(sources: &[PathBuf], dest_dir: &Path, verb: &str) -> Result<(), FsError> {
+fn guard_against_self_nesting(
+    sources: &[PathBuf],
+    dest_dir: &Path,
+    verb: &str,
+) -> Result<(), FsError> {
     for src in sources {
         if src.is_dir() && dest_dir.starts_with(src) {
             return Err(FsError::InvalidName {
-                message: format!("Can't {verb} \"{}\" into itself.", src.display()).into_boxed_str(),
+                message: format!("Can't {verb} \"{}\" into itself.", src.display())
+                    .into_boxed_str(),
             });
         }
     }
@@ -319,7 +328,13 @@ fn copy_recursive(
         std::fs::create_dir_all(dest)?;
         for entry in std::fs::read_dir(src)? {
             let entry = entry?;
-            copy_recursive(&entry.path(), &dest.join(entry.file_name()), app, done, total)?;
+            copy_recursive(
+                &entry.path(),
+                &dest.join(entry.file_name()),
+                app,
+                done,
+                total,
+            )?;
         }
     } else {
         if let Some(parent) = dest.parent() {
@@ -331,13 +346,7 @@ fn copy_recursive(
     // Emit roughly every 32 items (plus always the final one) so a huge
     // folder copy doesn't flood IPC with an event per file.
     if *done % 32 == 0 || *done == total {
-        let _ = app.emit(
-            "fs:copy-progress",
-            CopyProgress {
-                done: *done,
-                total,
-            },
-        );
+        let _ = app.emit("fs:copy-progress", CopyProgress { done: *done, total });
     }
     Ok(())
 }
@@ -361,7 +370,11 @@ pub fn copy_paths(
         }
     }
 
-    let total = sources.iter().map(|p| count_entries(p)).sum::<usize>().max(1);
+    let total = sources
+        .iter()
+        .map(|p| count_entries(p))
+        .sum::<usize>()
+        .max(1);
     let mut done = 0usize;
     let mut results = Vec::with_capacity(sources.len());
 
@@ -396,7 +409,11 @@ pub fn move_paths(
         }
     }
 
-    let total = sources.iter().map(|p| count_entries(p)).sum::<usize>().max(1);
+    let total = sources
+        .iter()
+        .map(|p| count_entries(p))
+        .sum::<usize>()
+        .max(1);
     let mut done = 0usize;
     let mut results = Vec::with_capacity(sources.len());
 
@@ -488,7 +505,7 @@ pub fn read_binary_preview(path: String) -> Result<Box<[u8]>, FsError> {
 /// after the fact) — `filter_entry` skips descending into them entirely, so
 /// a huge `node_modules` never actually gets enumerated. `.gitignore` rules
 /// are respected on top of this via `ignore::WalkBuilder`'s defaults.
-const ALWAYS_SKIP_DIRS: &[&str] = &[
+pub(crate) const ALWAYS_SKIP_DIRS: &[&str] = &[
     ".git",
     "node_modules",
     "target",

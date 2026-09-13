@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { SvelteMap } from "svelte/reactivity";
+import { toastStore } from "./toast.svelte";
 import {
   gitListRepos,
   gitStatus,
@@ -178,6 +179,16 @@ class GitStore {
     listen<RepoStatus>("git://status-changed", (event) => this.applyStatus(event.payload));
   }
 
+  /** Shared by every action below — records the message (for anything
+   *  still reading `lastError`) and surfaces it as a toast, since an
+   *  action the user just clicked failing is exactly the kind of thing
+   *  the toast system exists for. */
+  private reportError(err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err);
+    this.lastError = message;
+    toastStore.error(message);
+  }
+
   // --- staging / discard / commit -----------------------------------------
   // Every one of these relies on the backend's own `emit_status` call (see
   // git.rs) for the UI update — none of them need to manually re-fetch or
@@ -189,7 +200,7 @@ class GitStore {
       await gitStageFile(repoId, path);
       this.lastError = null;
     } catch (err) {
-      this.lastError = err instanceof Error ? err.message : String(err);
+      this.reportError(err);
     }
   }
 
@@ -198,7 +209,7 @@ class GitStore {
       await gitStageAll(repoId);
       this.lastError = null;
     } catch (err) {
-      this.lastError = err instanceof Error ? err.message : String(err);
+      this.reportError(err);
     }
   }
 
@@ -207,7 +218,7 @@ class GitStore {
       await gitUnstageFile(repoId, path);
       this.lastError = null;
     } catch (err) {
-      this.lastError = err instanceof Error ? err.message : String(err);
+      this.reportError(err);
     }
   }
 
@@ -216,7 +227,7 @@ class GitStore {
       await gitUnstageAll(repoId);
       this.lastError = null;
     } catch (err) {
-      this.lastError = err instanceof Error ? err.message : String(err);
+      this.reportError(err);
     }
   }
 
@@ -242,8 +253,9 @@ class GitStore {
       if (pending.path) await gitDiscardFile(pending.repoId, pending.path);
       else await gitDiscardAll(pending.repoId);
       this.lastError = null;
+      toastStore.success(pending.path ? "Discarded changes" : `Discarded ${pending.count} change${pending.count === 1 ? "" : "s"}`);
     } catch (err) {
-      this.lastError = err instanceof Error ? err.message : String(err);
+      this.reportError(err);
     }
   }
 

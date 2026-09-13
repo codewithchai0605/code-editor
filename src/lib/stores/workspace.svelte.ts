@@ -13,6 +13,8 @@ import {
 import { isFsError, type FsEntry } from "$lib/types/fs";
 import { baseName, parentOf } from "$lib/utils/path";
 import { gitStore } from "./git.svelte";
+import { toastStore } from "./toast.svelte";
+import { lspStore } from "$lib/lsp/manager.svelte"
 
 /**
  * Central state for the Explorer: which folder is open, which directories
@@ -63,6 +65,16 @@ class WorkspaceState {
   copyProgress = $state<{ done: number; total: number } | null>(null);
   lastError = $state<string | null>(null);
   private fsListenerStarted = false;
+
+  /** Sets `lastError` (still read directly in a couple of places) and
+   *  surfaces the same message as a toast — a file operation the user
+   *  just triggered (rename, delete, copy/move) failing is exactly the
+   *  kind of thing worth a visible, if transient, notification. */
+  private reportError(err: unknown): void {
+    const message = describeError(err);
+    this.lastError = message;
+    toastStore.error(message);
+  }
 
   childrenOf(path: string): FsEntry[] | undefined {
     return this.dirs.get(path)?.children;
@@ -115,8 +127,9 @@ class WorkspaceState {
       // (a slow/huge repo's status walk is unrelated to whether the
       // *files* are ready to show), and `setRoot` handles its own errors.
       void gitStore.scanWorkspace(path);
+      void lspStore.startForWorkspace(path);
     } catch (err) {
-      this.lastError = describeError(err);
+      this.reportError(err);
     }
   }
 
@@ -184,7 +197,7 @@ class WorkspaceState {
       this.creating = null;
       await this.refresh(parentDir);
     } catch (err) {
-      this.lastError = describeError(err);
+      this.reportError(err);
     }
   }
 
@@ -202,7 +215,7 @@ class WorkspaceState {
       this.renamingPath = null;
       await this.refresh(parentOf(path));
     } catch (err) {
-      this.lastError = describeError(err);
+      this.reportError(err);
     }
   }
 
@@ -215,7 +228,7 @@ class WorkspaceState {
       this.selected.clear();
       for (const parent of parents) await this.refresh(parent);
     } catch (err) {
-      this.lastError = describeError(err);
+      this.reportError(err);
     }
   }
 
@@ -291,7 +304,7 @@ class WorkspaceState {
         };
         return false;
       }
-      this.lastError = describeError(err);
+      this.reportError(err);
       return false;
     }
   }

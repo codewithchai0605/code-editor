@@ -112,12 +112,12 @@
     padding: 0 8px;
     display: flex;
     align-items: center;
-    border-radius: 2px;
+    border-radius: 4px;
     white-space: nowrap;
     color: inherit;
   }
   .chip:hover {
-    background: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.08);
   }
   .chip.static {
     cursor: default;

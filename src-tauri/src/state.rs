@@ -4,14 +4,13 @@ use portable_pty::{Child, MasterPty};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
 pub struct AppState {
     pub workspace_root: Mutex<Option<PathBuf>>,
     pub watcher: Mutex<Option<Debouncer<RecommendedWatcher>>>,
-    // pub git_watcher: Mutex<Option<Debouncer<RecommendedWatcher>>>,
 }
 
 /// The PTY/process handles for a session that's actually alive. Split out
@@ -90,4 +89,36 @@ impl PtyState {
 pub struct ProcessMonitorState {
     pub system: Mutex<sysinfo::System>,
     pub extra: Mutex<HashMap<String, (String, u32)>>,
+}
+
+/// A single monotonic counter shared with every in-flight workspace search.
+///
+/// Bumped once per `workspace_search`/`stop_workspace_search` call. Each
+/// search's parallel walker threads capture the post-bump value as their own
+/// "generation" and compare it against this shared counter's *current* value
+/// on every visited entry; the moment a newer search (or an explicit stop)
+/// bumps it again, every thread from the older search sees a mismatch and
+/// quits within one entry — a lock-free way to keep a debounced, rapidly
+/// re-triggered search from ever running two workspace walks at once, which
+/// matters for both wasted CPU and (since results are buffered in-flight)
+/// memory. Wrapped in an `Arc` rather than a bare `AtomicU64` so a clone of
+/// just the counter — not the whole `State` handle, which doesn't outlive
+/// the command call — can be moved into the search's background thread.
+#[derive(Default)]
+pub struct SearchState {
+    generation: Arc<AtomicU64>,
+}
+
+impl SearchState {
+    /// Advances to a new generation and returns it — the value any search
+    /// started *by this call* should tag itself with.
+    pub fn bump(&self) -> u64 {
+        self.generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// A cheap, 'static-lifetime clone of the shared counter for a
+    /// background thread to poll against.
+    pub fn handle(&self) -> Arc<AtomicU64> {
+        self.generation.clone()
+    }
 }

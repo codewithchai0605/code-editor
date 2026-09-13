@@ -6,6 +6,7 @@ const files = [
     "./src/",                 // folder
     "./src-tauri/src",        // folder
     "./scripts",              // folder
+    "./ss",                   // folder
     "./src-tauri/Cargo.toml", // file
     "./package.json",         // file
     "./README.md",            // file
@@ -22,6 +23,7 @@ const IGNORE = new Set([
     "dist",
     "build",
     ".svelte-kit",
+    "icons"
 ]);
 
 function addPath(path, baseDir = "..") {

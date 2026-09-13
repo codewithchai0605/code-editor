@@ -75,6 +75,14 @@ export function registerCoreCommands(): () => void {
       run: () => layout.toggleSidebar(),
     }),
     commandRegistry.register({
+      id: "workbench.findInFiles",
+      title: "View: Find in Files",
+      keybinding: "Ctrl+Shift+F",
+      run: () => {
+        if (workspace.rootPath) layout.setActiveView("search");
+      },
+    }),
+    commandRegistry.register({
       id: "workbench.togglePanel",
       title: "View: Toggle Panel",
       keybinding: "Ctrl+`",
