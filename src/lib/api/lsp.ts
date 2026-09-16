@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export function lspStart(root: string): Promise<void> {
-  return invoke("lsp_start", { root });
+export function lspStart(root: string, languageId: string): Promise<void> {
+  return invoke("lsp_start", { root, languageId });
 }
 
 export function lspDidOpen(root: string, languageId: string, uri: string, text: string): Promise<void> {

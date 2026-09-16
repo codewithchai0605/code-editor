@@ -11,6 +11,7 @@ import {
   copyLineDown,
 } from "@codemirror/commands";
 import { selectNextOccurrence } from "@codemirror/search";
+import { goToNextGitChange, goToPreviousGitChange } from "$lib/editor/git-gutter";
 import type { EditorView } from "@codemirror/view";
 
 /** Runs a CodeMirror command against the currently-visible editor, if
@@ -122,6 +123,18 @@ export function registerCoreCommands(): () => void {
       title: "Selection: Select Next Occurrence",
       keybinding: "Ctrl+D",
       run: onActiveView(selectNextOccurrence),
+    }),
+    commandRegistry.register({
+      id: "editor.gitGoToNextChange",
+      title: "Source Control: Go to Next Change",
+      keybinding: "Alt+F3",
+      run: onActiveView(goToNextGitChange),
+    }),
+    commandRegistry.register({
+      id: "editor.gitGoToPreviousChange",
+      title: "Source Control: Go to Previous Change",
+      keybinding: "Shift+Alt+F3",
+      run: onActiveView(goToPreviousGitChange),
     }),
     commandRegistry.register({
       id: "markdown.togglePreview",

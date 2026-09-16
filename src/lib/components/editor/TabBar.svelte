@@ -1,8 +1,23 @@
 <script lang="ts">
   import { editorStore } from "$lib/stores/editor.svelte";
   import { diffTabStore } from "$lib/stores/diffTab.svelte";
+  import { gitStore } from "$lib/stores/git.svelte";
   import { baseName } from "$lib/utils/path";
   import { fileIconColor } from "$lib/utils/fileIcons";
+
+  // Same convention (letters + colors) as the Explorer's own per-entry
+  // badge in FileTreeNode.svelte and the Source Control panel's file
+  // rows — keeping all three in sync is what makes a file's git status
+  // legible no matter which of them you're looking at, matching how VS
+  // Code decorates its own editor tabs.
+  const GIT_BADGE: Record<string, string> = {
+    modified: "M",
+    added: "A",
+    deleted: "D",
+    renamed: "R",
+    untracked: "U",
+    conflicted: "!",
+  };
 
   function onAuxClick(e: MouseEvent, path: string) {
     if (e.button === 1) {
@@ -28,6 +43,7 @@
   {#each editorStore.tabs as tab (tab.path)}
     {@const isActive =
       !diffTabStore.activeId && tab.path === editorStore.activePath}
+    {@const gitStatus = gitStore.statusFor(tab.path)?.status}
     <div
       class="tab"
       class:active={isActive}
@@ -45,8 +61,13 @@
           ? fileIconColor(tab.path)
           : "var(--color-text-faint)"}
       ></span>
-      <span class="name">{baseName(tab.path)}</span>
+      <span class="name" data-git-status={gitStatus}>{baseName(tab.path)}</span>
       {#if tab.isDirty}<span class="dirty" aria-hidden="true"></span>{/if}
+      {#if gitStatus}
+        <span class="git-badge" data-git-status={gitStatus}
+          >{GIT_BADGE[gitStatus]}</span
+        >
+      {/if}
       <button
         class="close"
         aria-label="Close {baseName(tab.path)}"
@@ -144,6 +165,36 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .name[data-git-status="modified"] {
+    color: #e2c08d;
+  }
+  .name[data-git-status="added"],
+  .name[data-git-status="untracked"],
+  .name[data-git-status="renamed"] {
+    color: #73c991;
+  }
+  .name[data-git-status="deleted"],
+  .name[data-git-status="conflicted"] {
+    color: #f48771;
+  }
+  .git-badge {
+    flex-shrink: 0;
+    font-size: 10.5px;
+    font-weight: 700;
+    opacity: 0.85;
+  }
+  .git-badge[data-git-status="modified"] {
+    color: #e2c08d;
+  }
+  .git-badge[data-git-status="added"],
+  .git-badge[data-git-status="untracked"],
+  .git-badge[data-git-status="renamed"] {
+    color: #73c991;
+  }
+  .git-badge[data-git-status="deleted"],
+  .git-badge[data-git-status="conflicted"] {
+    color: #f48771;
   }
   .dirty {
     flex-shrink: 0;

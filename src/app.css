@@ -83,19 +83,23 @@ button {
   width: 10px;
   height: 10px;
 }
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
   background-color: #4a4a4a;
   background-clip: content-box;
   border: 2px solid transparent;
   border-radius: 5px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
   background-color: #5a5a5a;
   background-clip: content-box;
 }
+
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
@@ -105,4 +109,34 @@ button {
 body.dragging-tree-item,
 body.dragging-tree-item * {
   cursor: grabbing !important;
+}
+
+.cm-foldGutter {
+  width: 18px;
+}
+
+.cm-foldGutter .cm-gutterElement {
+  padding: 0;
+}
+
+.fold-marker {
+  width: 18px;
+  height: 100%;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  opacity: 0.75;
+  cursor: pointer;
+
+  transition: opacity 100ms ease;
+}
+
+.cm-foldGutter .cm-gutterElement:hover .fold-marker {
+  opacity: 0.75;
+}
+
+.fold-marker:hover {
+  opacity: 1 !important;
 }

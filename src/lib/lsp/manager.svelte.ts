@@ -15,25 +15,37 @@ class LspStore {
   /** languageId -> status, read by LspStatusBar.svelte. */
   statuses = $state<Map<string, StatusEntry>>(new Map());
 
-  private listening = false;
+  private listeningPromise: Promise<void> | null = null;
 
-  /** Starts listening for LSP events (once, app-wide) and starts the
-   *  TypeScript server for `root`. Safe to call every time a workspace
-   *  opens — Rust's `lsp_start` is itself idempotent per (root,
-   *  languageId), and the event listeners are only ever registered once. */
-  async startForWorkspace(root: string): Promise<void> {
+  /** Starts (or reuses) the server configured for `languageId` in `root`.
+   *  Called lazily from editor.svelte.ts right before a file of that
+   *  language is opened — not eagerly for the whole workspace, since most
+   *  projects only use a handful of whatever languages the registry has
+   *  configured, and starting everything up front would spawn servers
+   *  nobody's using yet. Safe to call repeatedly and concurrently: Rust's
+   *  `lsp_start` is itself idempotent per (root, languageId). */
+  async ensureServerRunning(root: string, languageId: string): Promise<void> {
     await this.ensureListening();
     try {
-      await lspStart(root);
+      await lspStart(root, languageId);
     } catch (err) {
-      console.error("Failed to start TypeScript language server:", err);
+      console.error(`Failed to start '${languageId}' language server:`, err);
     }
   }
 
-  private async ensureListening(): Promise<void> {
-    if (this.listening) return;
-    this.listening = true;
+  /** Registers the lsp:status/lsp:diagnostics event listeners exactly
+   *  once, no matter how many times or how concurrently this is called —
+   *  `listeningPromise` is shared across all callers so a second call
+   *  that arrives while the first is still awaiting `listen()` doesn't
+   *  race ahead of registration completing. */
+  private ensureListening(): Promise<void> {
+    if (!this.listeningPromise) {
+      this.listeningPromise = this.registerListeners();
+    }
+    return this.listeningPromise;
+  }
 
+  private async registerListeners(): Promise<void> {
     await listen<LspStatusEvent>("lsp:status", (event) => {
       const { languageId, status } = event.payload;
       const next = new Map(this.statuses);

@@ -6,13 +6,13 @@ const files = [
     "./src/",                 // folder
     "./src-tauri/src",        // folder
     "./scripts",              // folder
-    "./ss",                   // folder
     "./src-tauri/Cargo.toml", // file
     "./package.json",         // file
     "./README.md",            // file
     "./vite.config.js",       // file
     "./svelte.config.js",     // file
     "./tsconfig.json",        // file
+    "./CLAUDE.md",        // file
 ];
 
 const zip = new JSZip();

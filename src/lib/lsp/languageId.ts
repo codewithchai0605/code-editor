@@ -1,11 +1,12 @@
 import { extensionOf } from "$lib/utils/fileIcons";
 
 /**
- * Step 1 of the incremental LSP build only has a single hardcoded server
- * (typescript-language-server), so this only recognizes the extensions it
- * handles. Everything else returns `null`, meaning "no LSP integration for
- * this file yet" — a normal, expected state, not an error. Extend this map
- * as the pluggable server registry (AGENT.md §3) grows.
+ * Maps a file extension to the language ID used both as the registry key
+ * in `.codeeditor/lsp-servers.json` and in the LSP `textDocument/didOpen`
+ * notification. `null` means "no LSP integration for this file" — a
+ * normal, expected state (most extensions won't have a server configured),
+ * not an error. Extend this alongside the registry's default entries in
+ * `src-tauri/src/lsp/registry.rs` when adding a new language.
  */
 const LANGUAGE_IDS: Record<string, string> = {
   ts: "typescript",
@@ -14,6 +15,8 @@ const LANGUAGE_IDS: Record<string, string> = {
   jsx: "typescript",
   mjs: "typescript",
   cjs: "typescript",
+  py: "python",
+  rs: "rust",
 };
 
 export function lspLanguageIdFor(fileName: string): string | null {

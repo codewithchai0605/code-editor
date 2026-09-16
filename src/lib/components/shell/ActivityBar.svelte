@@ -1,5 +1,6 @@
 <script lang="ts">
   import { layout, type ActivityView } from "$lib/stores/layout.svelte";
+  import { gitStore } from "$lib/stores/git.svelte";
 
   const topItems: { id: ActivityView; label: string }[] = [
     { id: "explorer", label: "Explorer" },
@@ -94,6 +95,9 @@
         onclick={() => layout.setActiveView(item.id)}
       >
         {@render icon(item.id)}
+        {#if item.id === "scm" && gitStore.totalChangeCount > 0}
+          <span class="badge-count">{gitStore.totalChangeCount}</span>
+        {/if}
       </button>
     {/each}
   </div>
@@ -129,6 +133,7 @@
   }
   .item {
     box-sizing: border-box;
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -137,6 +142,24 @@
     cursor: pointer;
     border-left: 2px solid transparent;
     color: var(--color-text-muted);
+  }
+  .badge-count {
+    position: absolute;
+    bottom: 6px;
+    right: 9px;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: var(--color-accent);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
   }
   .item svg {
     width: 22px;

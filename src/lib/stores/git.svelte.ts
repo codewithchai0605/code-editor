@@ -59,9 +59,29 @@ class GitStore {
   private byPath = new SvelteMap<string, GitFileEntry>();
   private folderStatus = new SvelteMap<string, GitFileEntry["status"]>();
   private listenerStarted = false;
+  /** Notified (with the repo's id) every time that repo's status is
+   *  re-applied — staging/unstaging/discarding/committing, or the
+   *  backend's own `.git`-internals watcher picking up an external change.
+   *  `editor.svelte.ts` uses this to keep each open file's gutter diff
+   *  decorations pointed at the right baseline without polling. */
+  private statusListeners = new Set<(repoId: string) => void>();
 
   get hasAnyRepo(): boolean {
     return this.repos.length > 0;
+  }
+
+  /** Total number of distinct changed files across every repo in the
+   *  workspace — the merged `byPath` map is already deduplicated (a file
+   *  staged *and* further modified only appears once), so this is exactly
+   *  the count the Activity Bar's Source Control badge should show,
+   *  matching VS Code's own badge semantics. */
+  get totalChangeCount(): number {
+    return this.byPath.size;
+  }
+
+  onStatusChanged(callback: (repoId: string) => void): () => void {
+    this.statusListeners.add(callback);
+    return () => this.statusListeners.delete(callback);
   }
 
   statusOf(repoId: string): RepoStatus | undefined {
@@ -158,6 +178,8 @@ class GitStore {
     for (const [key, entry] of this.byPath) {
       this.bubbleToAncestors(key, entry.status);
     }
+
+    for (const listener of this.statusListeners) listener(status.repoId);
   }
 
   private bubbleToAncestors(normalizedFilePath: string, status: GitFileEntry["status"]): void {

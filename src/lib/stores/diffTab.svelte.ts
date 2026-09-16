@@ -36,14 +36,14 @@ class DiffTabStore {
     async open(repoId: string, path: string, staged: boolean): Promise<void> {
         const id = `${repoId}:${path}:${staged}`;
         const existing = this.tabs.find((t) => t.id === id);
+        this.activeId = id;
         if (existing) {
-            this.activeId = id;
             // Refresh on reopen — the file may have changed since this diff was
             // last viewed, and reusing a stale diff would be actively misleading.
-            void this.load(existing);
+            await this.load(id);
             return;
         }
-        const tab: DiffTab = {
+        this.tabs.push({
             id,
             repoId,
             path,
@@ -52,21 +52,31 @@ class DiffTabStore {
             content: null,
             loading: true,
             error: null,
-        };
-        this.tabs.push(tab);
-        this.activeId = id;
-        await this.load(tab);
+        });
+        await this.load(id);
     }
 
-    private async load(tab: DiffTab): Promise<void> {
-        tab.loading = true;
-        tab.error = null;
+    /** Always re-fetches the tab from the live `$state` array by id rather
+     *  than accepting a `DiffTab` reference — pushing a plain object into a
+     *  `$state` array wraps it in a *new* reactive proxy, so a reference
+     *  captured at push time (or passed in from outside) is not the object
+     *  the UI actually reads from; mutating that stale reference silently
+     *  writes to memory nothing re-renders from. This was the exact cause
+     *  of "loading forever until you click again" — the second click's
+     *  `this.tabs.find(...)` happened to find the live proxy, the first
+     *  click's push-time reference never did. Same fix `editor.svelte.ts`'s
+     *  `updateTab` applies to `OpenTab` for the identical reason. */
+    private async load(id: string): Promise<void> {
+        const live = this.tabs.find((t) => t.id === id);
+        if (!live) return;
+        live.loading = true;
+        live.error = null;
         try {
-            tab.content = await gitDiff(tab.repoId, tab.path, tab.staged);
+            live.content = await gitDiff(live.repoId, live.path, live.staged);
         } catch (err) {
-            tab.error = err instanceof Error ? err.message : String(err);
+            live.error = err instanceof Error ? err.message : String(err);
         } finally {
-            tab.loading = false;
+            live.loading = false;
         }
     }
 

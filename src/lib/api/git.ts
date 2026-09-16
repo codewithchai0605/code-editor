@@ -49,6 +49,14 @@ export function gitDiff(repoId: string, path: string, staged: boolean): Promise<
   return invoke<DiffContent>("git_diff", { repoId, path, staged });
 }
 
+/** The text a live editor buffer should be diffed against for its gutter
+ *  decorations — the index's blob for `path` (empty string for an
+ *  untracked file, so the whole buffer reads as newly added). See
+ *  `$lib/editor/git-gutter.ts`. */
+export function gitFileBaseline(repoId: string, path: string): Promise<string> {
+  return invoke<string>("git_file_baseline", { repoId, path });
+}
+
 export function gitStageFile(repoId: string, path: string): Promise<void> {
   return invoke("git_stage_file", { repoId, path });
 }

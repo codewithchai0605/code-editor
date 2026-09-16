@@ -23,7 +23,7 @@
   function onSearchKeydown(e: KeyboardEvent) {
     if (e.key === "Enter") {
       e.preventDefault();
-      // store.searchImmediately();
+      store.searchImmediately();
     } else if (e.key === "Escape" && store.term) {
       e.preventDefault();
       store.clearQuery();
@@ -52,7 +52,12 @@
         aria-label="Toggle replace"
         onclick={() => store.toggleShowReplace()}
       >
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+        <svg
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+        >
           <path d="M6 4l4 4-4 4" />
         </svg>
       </button>
@@ -68,8 +73,19 @@
           onkeydown={onSearchKeydown}
         />
         {#if store.term}
-          <button type="button" class="clear-btn" title="Clear" aria-label="Clear search" onclick={() => store.clearQuery()}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          <button
+            type="button"
+            class="clear-btn"
+            title="Clear"
+            aria-label="Clear search"
+            onclick={() => store.clearQuery()}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18" /></svg
+            >
           </button>
         {/if}
         <div class="field-toggles">
@@ -79,24 +95,24 @@
             class:active={store.caseSensitive}
             aria-pressed={store.caseSensitive}
             title="Match Case"
-            onclick={() => store.toggleCaseSensitive()}
-          >Aa</button>
+            onclick={() => store.toggleCaseSensitive()}>Aa</button
+          >
           <button
             type="button"
             class="toggle"
             class:active={store.wholeWord}
             aria-pressed={store.wholeWord}
             title="Match Whole Word"
-            onclick={() => store.toggleWholeWord()}
-          >ab</button>
+            onclick={() => store.toggleWholeWord()}>ab</button
+          >
           <button
             type="button"
             class="toggle"
             class:active={store.regex}
             aria-pressed={store.regex}
             title="Use Regular Expression"
-            onclick={() => store.toggleRegex()}
-          >.*</button>
+            onclick={() => store.toggleRegex()}>.*</button
+          >
         </div>
       </div>
     </div>
@@ -115,8 +131,16 @@
           />
         </div>
         {#if store.confirmingReplaceAll}
-          <button type="button" class="text-btn danger" onclick={() => store.confirmReplaceAll()}>Confirm</button>
-          <button type="button" class="text-btn" onclick={() => store.cancelReplaceAll()}>Cancel</button>
+          <button
+            type="button"
+            class="text-btn danger"
+            onclick={() => store.confirmReplaceAll()}>Confirm</button
+          >
+          <button
+            type="button"
+            class="text-btn"
+            onclick={() => store.cancelReplaceAll()}>Cancel</button
+          >
         {:else}
           <button
             type="button"
@@ -124,12 +148,17 @@
             disabled={store.fileCount === 0 || store.isReplacing}
             title="Replace All (Ctrl+Enter)"
             onclick={() => store.requestReplaceAll()}
-          >{store.isReplacing ? "Replacing…" : "Replace All"}</button>
+            >{store.isReplacing ? "Replacing…" : "Replace All"}</button
+          >
         {/if}
       </div>
     {/if}
 
-    <button type="button" class="filters-toggle" onclick={() => store.toggleShowFilters()}>
+    <button
+      type="button"
+      class="filters-toggle"
+      onclick={() => store.toggleShowFilters()}
+    >
       <svg
         class="chevron"
         class:collapsed={!store.showFilters}
@@ -173,7 +202,12 @@
   {#if store.replaceSummary}
     <div class="replace-summary">
       <span>{store.replaceSummary}</span>
-      <button type="button" class="icon-btn" title="Dismiss" onclick={() => (store.replaceSummary = null)}>×</button>
+      <button
+        type="button"
+        class="icon-btn"
+        title="Dismiss"
+        onclick={() => (store.replaceSummary = null)}>×</button
+      >
     </div>
   {/if}
 
@@ -183,7 +217,9 @@
     {:else if store.hasQuery && store.fileCount > 0}
       {store.totalMatches}
       {matchWord} in {store.fileCount}
-      {fileWord}{store.truncated ? " — showing partial results, narrow your search" : ""}
+      {fileWord}{store.truncated
+        ? " — showing partial results, narrow your search"
+        : ""}
     {:else if store.hasQuery && store.status === "done"}
       No results found.
     {:else}
@@ -196,7 +232,11 @@
       {@const matches = store.results.get(path) ?? []}
       {@const collapsed = store.collapsedFiles.has(path)}
       <div class="file-group">
-        <button type="button" class="file-header" onclick={() => store.toggleCollapse(path)}>
+        <button
+          type="button"
+          class="file-header"
+          onclick={() => store.toggleCollapse(path)}
+        >
           <svg
             class="chevron"
             class:collapsed
@@ -207,8 +247,16 @@
           >
             <path d="M6 4l4 4-4 4" />
           </svg>
-          <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke={fileIconColor(baseName(path))} stroke-width="1.6">
-            <path d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
+          <svg
+            class="file-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke={fileIconColor(baseName(path))}
+            stroke-width="1.6"
+          >
+            <path
+              d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"
+            />
             <path d="M14 3v4a1 1 0 0 0 1 1h4" />
           </svg>
           <span class="file-name">{baseName(path)}</span>
@@ -219,7 +267,11 @@
         </button>
         {#if !collapsed}
           {#each matches as match, i (i)}
-            <SearchMatchRow {path} {match} onNavigate={() => store.navigate(path, match)} />
+            <SearchMatchRow
+              {path}
+              {match}
+              onNavigate={() => store.navigate(path, match)}
+            />
           {/each}
         {/if}
       </div>

@@ -45,7 +45,6 @@ pub enum TerminalSession {
     Creating,
     Running(RunningPty),
     Closing,
-    Exited,
     Failed,
 }
 
@@ -66,7 +65,6 @@ impl TerminalSession {
             TerminalSession::Creating => "Terminal is still starting.",
             TerminalSession::Running(_) => "Terminal is running.",
             TerminalSession::Closing => "Terminal is closing.",
-            TerminalSession::Exited => "Terminal has exited.",
             TerminalSession::Failed => "Terminal failed to start.",
         }
     }

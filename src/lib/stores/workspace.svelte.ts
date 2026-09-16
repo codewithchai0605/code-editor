@@ -127,7 +127,7 @@ class WorkspaceState {
       // (a slow/huge repo's status walk is unrelated to whether the
       // *files* are ready to show), and `setRoot` handles its own errors.
       void gitStore.scanWorkspace(path);
-      void lspStore.startForWorkspace(path);
+      // void lspStore.startForWorkspace(path);
     } catch (err) {
       this.reportError(err);
     }

@@ -40,6 +40,7 @@ pub fn run() {
             commands::git::git_list_repos,
             commands::git::git_status,
             commands::git::git_diff,
+            commands::git::git_file_baseline,
             commands::git::git_stage_file,
             commands::git::git_stage_all,
             commands::git::git_unstage_file,

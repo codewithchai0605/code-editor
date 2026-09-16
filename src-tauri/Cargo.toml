@@ -32,4 +32,5 @@ sysinfo = "0.38.4"
 lsp-types = "0.97.0"
 tokio = { version = "1.53.1", features = ["macros", "process", "time", "io-util", "rt", "sync"] }
 regex = "1.13.1"
+which = "8.0.6"
 

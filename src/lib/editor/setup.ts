@@ -42,6 +42,7 @@ import { rainbowBrackets } from "./rainbow-brackets";
 import tagAutoRename from "./tag-auto-rename";
 import indentationFolding from "./indentation-folding";
 import { colorChips } from "./color-chip";
+import { gitGutter, goToNextGitChange, goToPreviousGitChange } from "./git-gutter";
 import { emmetExpandCommand } from "./emmet";
 import { extensionOf } from "$lib/utils/fileIcons";
 import { lspDiagnostics } from "$lib/lsp/diagnostics";
@@ -58,6 +59,32 @@ import { pathToFileUri } from "$lib/lsp/uri";
  * changes.
  */
 export const themeCompartment = new Compartment();
+
+
+function createFoldMarker(open: boolean) {
+  const marker = document.createElement("span");
+  marker.className = "fold-marker";
+
+  marker.innerHTML = `
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      aria-hidden="true"
+    >
+      <path
+        d="${open ? "M4 6l4 4 4-4" : "M6 4l4 4-4 4"}"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+  `;
+
+  return marker;
+};
 
 /**
  * This deliberately mirrors CodeMirror's own `basicSetup` ingredient list
@@ -95,10 +122,15 @@ export function baseExtensions(onSave: () => void, initialTheme: Theme, filePath
 
   return [
     lineNumbers(),
+    ...(filePath ? gitGutter(filePath) : []),
     highlightActiveLineGutter(),
     highlightSpecialChars(),
     history(),
-    foldGutter(),
+    foldGutter({
+      markerDOM(open) {
+        return createFoldMarker(open);
+      },
+    }),
     drawSelection(),
     dropCursor(),
     EditorState.allowMultipleSelections.of(true),
@@ -130,6 +162,8 @@ export function baseExtensions(onSave: () => void, initialTheme: Theme, filePath
       },
       { key: "Mod-f", run: openSearchPanel },
       { key: "Mod-d", run: selectNextOccurrence },
+      { key: "Alt-F3", run: goToNextGitChange },
+      { key: "Shift-Alt-F3", run: goToPreviousGitChange },
       { key: "Alt-ArrowUp", run: moveLineUp },
       { key: "Alt-ArrowDown", run: moveLineDown },
       { key: "Shift-Alt-ArrowUp", run: copyLineUp },

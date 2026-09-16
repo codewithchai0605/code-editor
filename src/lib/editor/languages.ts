@@ -1,21 +1,17 @@
 import type { Extension } from "@codemirror/state";
 import { LanguageDescription, LanguageSupport } from "@codemirror/language";
+import { languages as registeredLanguages } from "@codemirror/language-data";
 import { extensionOf } from "$lib/utils/fileIcons";
 import { snippetSourceFor } from "./snippets";
-import { languages } from "@codemirror/language-data";
 
 type LanguageLoader = () => Promise<Extension>;
 
 /**
  * `.env` files are exactly the case `extensionOf()` isn't built for: a
- * plain `.env` has no "extension" by that function's definition (the
- * leading dot IS the only dot, so `extensionOf` correctly treats it as a
- * dotfile with no extension), and `.env.local`/`.env.production` etc.
- * would resolve to `local`/`production` — the *last* dot-segment — not
- * `env`. Matching the filename shape directly here, rather than trying to
- * bend `extensionOf`'s general "last segment after the last dot" rule to
- * cover this one special case too, keeps that function's contract simple
- * for everything else that relies on it (snippets, Emmet, file icons).
+ * plain `.env` has no "extension" by that function's definition, and
+ * `.env.local`/`.env.production` etc. would resolve to `local`/`production`
+ * — the *last* dot-segment — not `env`. Matched by filename shape here
+ * rather than bending `extensionOf`'s general rule to cover this one case.
  */
 const DOTENV_PATTERN = /^\.env(\..+)?$/i;
 
@@ -25,140 +21,94 @@ function languageKeyFor(fileName: string): string {
   return extensionOf(fileName);
 }
 
-function createLanguageLoader(name: string, lang: LanguageDescription) {
-  const normalizedName =  name.trim().toLowerCase();
-
-  switch (normalizedName) {
-    case "javascript":
-      return async () => {
-        const { javascript } = await import("@codemirror/lang-javascript");
-        return javascript({ jsx: true });
-      };
-
-    case "html":
-      return async () => {
-        const { html } = await import("@codemirror/lang-html");
-        return html({ autoCloseTags: true });
-      };
-
-    case "xml":
-      return async () => {
-        const { xml } = await import("@codemirror/lang-xml");
-        return xml({ autoCloseTags: true });
-      };
-
-    case "vue":
-      return async () => {
-        const [{ vue }, { html }] = await Promise.all([
-          import("@codemirror/lang-vue"),
-          import("@codemirror/lang-html"),
-        ]);
-        return vue({
-          base: html({ autoCloseTags: true }),
-        });
-      };
-
-    case "angular":
-      return async () => {
-        const [{ angular }, { html }] = await Promise.all([
-          import("@codemirror/lang-angular"),
-          import("@codemirror/lang-html"),
-        ]);
-        return angular({
-          base: html({
-            autoCloseTags: true,
-            selfClosingTags: true,
-          }),
-        });
-      };
-
-    case "php":
-      return async () => {
-        const [{ php }, { html }] = await Promise.all([
-          import("@codemirror/lang-php"),
-          import("@codemirror/lang-html"),
-        ]);
-        const htmlSupport = html({
-          autoCloseTags: true,
-          matchClosingTags: false,
-        });
-        return [
-          php({ baseLanguage: htmlSupport.language }),
-          htmlSupport.support,
-        ];
-      };
-  }
-
-  return typeof lang.load === "function" ? () => lang.load!() : null;
-}
-
-const languageLoaders = () => {
-  const loaders = {};
-  for (const lang of languages as readonly LanguageDescription[]) {
-    const name = String(lang?.name || "").trim();
-    if (!name) continue;
-
-  }
-  return null;
-}
 /**
- * Every loader is a dynamic import, so the language parser for a file type
- * only ever gets fetched/parsed once a file of that type is actually
- * opened — the initial bundle stays limited to CodeMirror's core, not
- * every language we support.
+ * Hand-tuned loaders for the handful of languages worth actual
+ * configuration beyond their package's own default — JSX on for every JS
+ * flavor, auto-closing tags for markup languages, a shared HTML base for
+ * Vue/PHP — plus the two fully custom languages (`env`, `prisma`) that
+ * aren't in any public registry at all.
+ *
+ * Everything else falls through to `@codemirror/language-data`'s own
+ * ~190-language registry in `loadLanguage` below, so this map only needs
+ * to grow when a language specifically needs configuring, not every time
+ * a new one should merely be *supported*.
  */
 const loaders: Record<string, LanguageLoader> = {
-  js: async () => (await import("@codemirror/lang-javascript")).javascript(),
-  mjs: async () => (await import("@codemirror/lang-javascript")).javascript(),
-  cjs: async () => (await import("@codemirror/lang-javascript")).javascript(),
+  js: async () => (await import("@codemirror/lang-javascript")).javascript({ jsx: true }),
+  mjs: async () => (await import("@codemirror/lang-javascript")).javascript({ jsx: true }),
+  cjs: async () => (await import("@codemirror/lang-javascript")).javascript({ jsx: true }),
   jsx: async () => (await import("@codemirror/lang-javascript")).javascript({ jsx: true }),
   ts: async () => (await import("@codemirror/lang-javascript")).javascript({ typescript: true }),
   tsx: async () =>
     (await import("@codemirror/lang-javascript")).javascript({ jsx: true, typescript: true }),
-  json: async () => (await import("@codemirror/lang-json")).json(),
-  py: async () => (await import("@codemirror/lang-python")).python(),
-  rs: async () => (await import("@codemirror/lang-rust")).rust(),
-  html: async () => (await import("@codemirror/lang-html")).html(),
-  htm: async () => (await import("@codemirror/lang-html")).html(),
-  css: async () => (await import("@codemirror/lang-css")).css(),
-  md: async () => (await import("@codemirror/lang-markdown")).markdown(),
-  markdown: async () => (await import("@codemirror/lang-markdown")).markdown(),
-  c: async () => (await import("@codemirror/lang-cpp")).cpp(),
-  h: async () => (await import("@codemirror/lang-cpp")).cpp(),
-  cpp: async () => (await import("@codemirror/lang-cpp")).cpp(),
-  cc: async () => (await import("@codemirror/lang-cpp")).cpp(),
-  hpp: async () => (await import("@codemirror/lang-cpp")).cpp(),
-  java: async () => (await import("@codemirror/lang-java")).java(),
-  php: async () => (await import("@codemirror/lang-php")).php(),
-  sql: async () => (await import("@codemirror/lang-sql")).sql(),
-  xml: async () => (await import("@codemirror/lang-xml")).xml(),
-  svg: async () => (await import("@codemirror/lang-xml")).xml(),
-  yaml: async () => (await import("@codemirror/lang-yaml")).yaml(),
-  yml: async () => (await import("@codemirror/lang-yaml")).yaml(),
+  html: async () => (await import("@codemirror/lang-html")).html({ autoCloseTags: true }),
+  htm: async () => (await import("@codemirror/lang-html")).html({ autoCloseTags: true }),
+  xml: async () => (await import("@codemirror/lang-xml")).xml({ autoCloseTags: true }),
+  svg: async () => (await import("@codemirror/lang-xml")).xml({ autoCloseTags: true }),
+  vue: async () => {
+    const [{ vue }, { html }] = await Promise.all([
+      import("@codemirror/lang-vue"),
+      import("@codemirror/lang-html"),
+    ]);
+    return vue({ base: html({ autoCloseTags: true }) });
+  },
+  php: async () => {
+    const [{ php }, { html }] = await Promise.all([
+      import("@codemirror/lang-php"),
+      import("@codemirror/lang-html"),
+    ]);
+    const htmlSupport = html({ autoCloseTags: true, matchClosingTags: false });
+    return [php({ baseLanguage: htmlSupport.language }), htmlSupport.support];
+  },
   env: async () => (await import("./languages/env")).envLanguage,
   prisma: async () => (await import("./languages/prisma")).prismaLanguage,
 };
 
-/** Returns `null` for unrecognized extensions — the file still opens and
- *  edits fine, just without syntax highlighting. */
+/** Returns `null` for a file nothing recognizes — it still opens and edits
+ *  fine, just without syntax highlighting.
+ *
+ *  Resolution order: the hand-tuned `loaders` above (checked by extension
+ *  key) first, then `@codemirror/language-data`'s registry via
+ *  `LanguageDescription.matchFilename` — which itself checks *filename*
+ *  patterns before extensions, so it correctly matches things like
+ *  `Dockerfile` or `Makefile` that have no extension at all. That one
+ *  fallback is what took this from ~20 hand-maintained extensions to the
+ *  registry's full ~190 languages (Go, Rust... already hand-tuned above,
+ *  but also Kotlin, Swift, Ruby, Shell, TOML, YAML variants, CMake,
+ *  GraphQL, LaTeX, PowerShell, Nginx/Apache configs, and more) for free —
+ *  new entries in that package's own registry need nothing added here. */
 export async function loadLanguage(fileName: string): Promise<Extension | null> {
-  const ext = languageKeyFor(fileName);
-  const loader = loaders[ext];
-  if (!loader) return null;
+  const key = languageKeyFor(fileName);
+  const loader = loaders[key];
+
+  let support: Extension | null = null;
   try {
-    const support = await loader();
-    // Snippets are attached to the *language's own* data facet (rather
-    // than via `autocompletion()`'s `override` back in setup.ts) so they
-    // show up alongside each language package's own built-in completions
-    // instead of silently replacing them — `override` takes over the
-    // entire completion source list, built-ins included.
-    const snippetSource = snippetSourceFor(ext);
-    if (snippetSource && support instanceof LanguageSupport) {
-      return [support, support.language.data.of({ autocomplete: snippetSource })];
+    if (loader) {
+      support = await loader();
+    } else {
+      const baseName = fileName.split(/[\\/]/).pop() ?? fileName;
+      const desc = LanguageDescription.matchFilename(registeredLanguages, baseName);
+      // `LanguageDescription` caches its own `.load()` result internally
+      // (via its private `support`/`loading` fields) — reopening the same
+      // file type repeatedly doesn't re-trigger the dynamic import.
+      if (desc) support = await desc.load();
     }
-    return support;
   } catch (err) {
     console.error("Failed to load language support:", err);
     return null;
   }
+  if (!support) return null;
+
+  // Snippets are attached to the *language's own* data facet (rather than
+  // via `autocompletion()`'s `override` back in setup.ts) so they show up
+  // alongside each language package's own built-in completions instead of
+  // silently replacing them — `override` takes over the entire completion
+  // source list, built-ins included. Only applies to the hand-tuned set
+  // above (`snippetSourceFor` has no entries for the registry fallback's
+  // languages), which is exactly the set snippets.ts covers anyway.
+  const snippetSource = snippetSourceFor(key);
+  if (snippetSource && support instanceof LanguageSupport) {
+    return [support, support.language.data.of({ autocomplete: snippetSource })];
+  }
+  return support;
 }

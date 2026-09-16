@@ -126,16 +126,95 @@
     <path d="M12.5 8a4.5 4.5 0 0 1-7.5 3.2l-2-2" />
   </svg>
 {/snippet}
+{#snippet branchIcon()}
+  <svg
+    class="branch-icon"
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <circle cx="4.5" cy="3.5" r="1.5" />
+    <circle cx="4.5" cy="12.5" r="1.5" />
+    <circle cx="11.5" cy="6.5" r="1.5" />
+    <path d="M4.5 5v6" />
+    <path d="M4.5 8c0-1.5 1.2-2.5 3-2.8l2.2-.3" />
+  </svg>
+{/snippet}
+{#snippet arrowUpIcon()}
+  <svg
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M8 12.5V3.5M4.5 7l3.5-3.5L11.5 7" />
+  </svg>
+{/snippet}
+{#snippet arrowDownIcon()}
+  <svg
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M8 3.5v9M4.5 9l3.5 3.5L11.5 9" />
+  </svg>
+{/snippet}
+{#snippet checkIcon()}
+  <svg
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M3.5 8.5l3 3 6-7" />
+  </svg>
+{/snippet}
+{#snippet emptyStateIcon()}
+  <svg
+    viewBox="0 0 32 32"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.3"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <circle cx="9" cy="7" r="3" />
+    <circle cx="9" cy="25" r="3" />
+    <circle cx="23" cy="13" r="3" />
+    <path d="M9 10v12" />
+    <path d="M9 16c0-3 2.4-5 6-5.6l4.6-.7" />
+  </svg>
+{/snippet}
 
 <div class="git-panel">
   {#if !gitStore.hasAnyRepo}
-    <p class="placeholder">No git repository detected in this workspace.</p>
+    <div class="empty-state">
+      {@render emptyStateIcon()}
+      <p class="empty-title">No Source Control Providers</p>
+      <p class="empty-desc">
+        Open a folder containing a Git repository to track and commit changes
+        here.
+      </p>
+    </div>
   {:else}
     {#each gitStore.repos as repo (repo.id)}
       {@const status = gitStore.statusOf(repo.id)}
       {@const isCollapsed = collapsed.has(repo.id)}
       {@const changeCount = status
         ? status.unstaged.length + status.untracked.length
+        : 0}
+      {@const totalChanges = status
+        ? status.staged.length + changeCount + status.conflicted.length
         : 0}
       <section class="repo">
         <div class="repo-header">
@@ -152,16 +231,33 @@
             </svg>
             <span class="repo-name">{repo.name}</span>
             {#if repo.currentBranch}
-              <span class="repo-branch">{repo.currentBranch}</span>
+              <span class="repo-branch">
+                {@render branchIcon()}
+                <span class="repo-branch-name">{repo.currentBranch}</span>
+              </span>
             {/if}
             {#if repo.ahead || repo.behind}
-              <span class="repo-ahead-behind">
-                {repo.ahead ? `↑${repo.ahead}` : ""}{repo.behind
-                  ? `↓${repo.behind}`
-                  : ""}
+              <span class="repo-sync">
+                {#if repo.behind}
+                  <span class="sync-part"
+                    >{@render arrowDownIcon()}{repo.behind}</span
+                  >
+                {/if}
+                {#if repo.ahead}
+                  <span class="sync-part"
+                    >{@render arrowUpIcon()}{repo.ahead}</span
+                  >
+                {/if}
               </span>
             {/if}
           </button>
+          {#if totalChanges > 0}
+            <span
+              class="repo-change-count"
+              title="{totalChanges} change{totalChanges === 1 ? '' : 's'}"
+              >{totalChanges}</span
+            >
+          {/if}
           <button
             class="icon-btn"
             title="Refresh"
@@ -185,17 +281,25 @@
                     ...commitMessages,
                     [repo.id]: e.currentTarget.value,
                   })}
+                onkeydown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    handleCommit(repo.id);
+                  }
+                }}
               ></textarea>
               {#if commitErrors[repo.id]}
                 <p class="commit-error">{commitErrors[repo.id]}</p>
               {/if}
               <button
                 class="commit-btn"
+                title="Commit (Ctrl+Enter)"
                 disabled={status.staged.length === 0 ||
                   !(commitMessages[repo.id] ?? "").trim()}
                 onclick={() => handleCommit(repo.id)}
               >
-                Commit ({status.staged.length})
+                {@render checkIcon()}
+                Commit{status.staged.length ? ` (${status.staged.length})` : ""}
               </button>
             </div>
 
@@ -390,7 +494,7 @@
             {/if}
 
             {#if !status.conflicted.length && !status.staged.length && !changeCount}
-              <p class="clean">No changes.</p>
+              <p class="clean">{@render checkIcon()} No changes</p>
             {/if}
           {/if}
         {/if}
@@ -407,9 +511,30 @@
     flex-direction: column;
     font-size: 12px;
   }
-  .placeholder {
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 8px;
+    padding: 32px 20px 16px;
+    color: var(--color-text-faint);
+  }
+  .empty-state svg {
+    width: 32px;
+    height: 32px;
+    opacity: 0.5;
+  }
+  .empty-title {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
     color: var(--color-text-muted);
-    padding: 4px 2px;
+  }
+  .empty-desc {
+    margin: 0;
+    font-size: 11.5px;
+    line-height: 1.5;
   }
   .loading {
     color: var(--color-text-faint);
@@ -420,6 +545,10 @@
     display: flex;
     flex-direction: column;
     margin-bottom: 8px;
+  }
+  .repo:not(:first-child) {
+    border-top: 1px solid var(--color-border);
+    padding-top: 6px;
   }
   .repo-header {
     display: flex;
@@ -456,12 +585,55 @@
     white-space: nowrap;
   }
   .repo-branch {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
     font-weight: 400;
     color: var(--color-text-muted);
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    padding: 1px 7px 1px 5px;
   }
-  .repo-ahead-behind {
+  .branch-icon {
+    width: 11px;
+    height: 11px;
+    flex-shrink: 0;
+  }
+  .repo-branch-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 12ch;
+  }
+  .repo-sync {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
     font-weight: 400;
+    font-variant-numeric: tabular-nums;
     color: var(--color-text-faint);
+  }
+  .sync-part {
+    display: flex;
+    align-items: center;
+    gap: 1px;
+  }
+  .sync-part svg {
+    width: 10px;
+    height: 10px;
+  }
+  .repo-change-count {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--color-text-muted);
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 9px;
+    padding: 2.5px 5.5px;
+    font-variant-numeric: tabular-nums;
   }
   .commit-box {
     display: flex;
@@ -486,13 +658,25 @@
     font-size: 11px;
   }
   .commit-btn {
-    align-self: flex-start;
-    padding: 4px 12px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    align-self: stretch;
+    justify-content: center;
+    padding: 5px 12px;
     border-radius: 4px;
     background: var(--color-accent);
     color: #fff;
     font-size: 12px;
     font-weight: 600;
+  }
+  .commit-btn svg {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+  }
+  .commit-btn:not(:disabled):hover {
+    filter: brightness(1.08);
   }
   .commit-btn:disabled {
     opacity: 0.4;
@@ -618,8 +802,16 @@
     color: #f48771;
   }
   .clean {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     color: var(--color-text-faint);
-    padding: 3px 2px 3px 20px;
+    padding: 4px 2px 4px 20px;
     margin: 0;
+  }
+  .clean svg {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
   }
 </style>

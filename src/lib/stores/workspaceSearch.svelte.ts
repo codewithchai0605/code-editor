@@ -157,6 +157,19 @@ class WorkspaceSearchStore {
         this.debounceTimer = setTimeout(() => void this.runSearch(), DEBOUNCE_MS);
     }
 
+    /** Skips the debounce and searches right now — used by Enter in the
+     *  search box, where waiting the usual 180ms after a keypress the user
+     *  explicitly used to say "go" would feel laggy. */
+    searchImmediately(): void {
+        if (this.debounceTimer) clearTimeout(this.debounceTimer);
+        this.debounceTimer = null;
+        if (!this.hasQuery) {
+            this.stopAndClear();
+            return;
+        }
+        void this.runSearch();
+    }
+
     private stopAndClear(): void {
         // Bumping past whatever search id was last issued means a late
         // in-flight batch/done event for it will fail the `searchId` check

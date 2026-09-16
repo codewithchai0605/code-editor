@@ -41,6 +41,41 @@ use tokio::sync::{oneshot, Mutex as AsyncMutex};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// Resolves a command name (e.g. "typescript-language-server") to its real
+/// executable path via `PATH`, correctly handling Windows.
+///
+/// **This is the fix for "program not found" even when the tool is
+/// installed and on PATH.** `Command::new("foo")` calls `CreateProcessW`
+/// directly on Windows, which does *not* consult the `PATHEXT` environment
+/// variable — so it only ever finds `foo.exe`/`foo.com`, never
+/// `foo.cmd`/`foo.bat`. Global npm packages on Windows install as `.cmd`
+/// shim scripts (e.g. `typescript-language-server.cmd`), not `.exe`
+/// files, which is exactly why this worked fine typed into PowerShell
+/// (the shell *does* do PATHEXT-aware lookup) but failed when spawned
+/// from Rust. The `which` crate performs the same PATH × PATHEXT search a
+/// shell would.
+///
+/// Falls back to the bare name if resolution fails, so the *original*,
+/// more actionable "not installed?" error still surfaces from the actual
+/// spawn attempt below, rather than a different error from here.
+///
+/// Security note for later steps: Windows' `CreateProcess` has
+/// undocumented-but-real special handling that silently routes `.bat`/
+/// `.cmd` targets through `cmd.exe` — which is exactly what makes this
+/// fix work, but historically made argument escaping a real attack
+/// surface (see CVE-2024-24576, fixed upstream in Rust 1.77.2). The only
+/// argument passed here (`--stdio`) is a hardcoded literal, not
+/// user-controlled, so there's nothing to inject today — but once the
+/// server registry (§3) reads `args` from user-editable config, that
+/// input should be treated as trusted-but-reviewable, the same trust
+/// level as any other project-local config file that can run commands.
+fn resolve_program(name: &str) -> String {
+    which::which(name)
+        .ok()
+        .and_then(|p| p.to_str().map(str::to_owned))
+        .unwrap_or_else(|| name.to_string())
+}
+
 /// Identifies one running server instance: a language on a specific
 /// project root. Two different projects open in the same app instance
 /// (or two different languages in the same project) each get their own
@@ -161,7 +196,8 @@ impl LspManager {
 
         emit_status(&app, &key, ServerStatus::Starting);
 
-        let mut cmd = Command::new("typescript-language-server");
+        let program = resolve_program("typescript-language-server");
+        let mut cmd = Command::new(&program);
         cmd.arg("--stdio");
         cmd.current_dir(&root);
         cmd.stdin(std::process::Stdio::piped());
@@ -178,8 +214,8 @@ impl LspManager {
             Ok(child) => child,
             Err(e) => {
                 let message = format!(
-                    "Failed to launch typescript-language-server: {e}. Is it installed and on PATH? \
-                     (npm i -g typescript-language-server typescript)"
+                    "Failed to launch typescript-language-server (resolved to '{program}'): {e}. \
+                     Is it installed and on PATH? (npm i -g typescript-language-server typescript)"
                 );
                 emit_status(&app, &key, ServerStatus::Crashed { message: message.clone() });
                 return Err(message);

@@ -402,6 +402,28 @@ pub fn git_diff(
     })
 }
 
+/// Returns just the "original" side a live editor buffer should be diffed
+/// against for its gutter decorations — the same index blob `git_diff`'s
+/// unstaged mode reads its old side from (so staging a hunk and continuing
+/// to edit only shows the *remaining* delta, matching VS Code's own
+/// dirty-diff behavior). An untracked file has no index entry, which
+/// `unwrap_or_default()` turns into an empty string — i.e. the whole
+/// buffer diffs as newly added, exactly like `git_diff` already does for
+/// that case.
+#[tauri::command]
+pub fn git_file_baseline(
+    state: State<GitManagerState>,
+    repo_id: String,
+    path: String,
+) -> Result<String, String> {
+    let (repo, repo_path) = open_tracked_repo(&state, &repo_id)?;
+    let absolute = PathBuf::from(&path);
+    let rel = relative_to_repo(&repo_path, &absolute)?;
+    let rel_str = rel.to_string_lossy().replace('\\', "/");
+    let index = repo.index().map_err(|e| e.to_string())?;
+    Ok(index_blob_content(&repo, &index, &rel_str).unwrap_or_default())
+}
+
 #[tauri::command]
 pub fn git_unwatch_all(state: State<GitManagerState>) {
     state.repos.lock().unwrap().clear();
