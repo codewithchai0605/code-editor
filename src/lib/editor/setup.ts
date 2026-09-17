@@ -47,6 +47,12 @@ import { emmetExpandCommand } from "./emmet";
 import { extensionOf } from "$lib/utils/fileIcons";
 import { lspDiagnostics } from "$lib/lsp/diagnostics";
 import { pathToFileUri } from "$lib/lsp/uri";
+import { lspCompletionSource } from "$lib/lsp/completion";
+import { lspHoverTooltip } from "$lib/lsp/hover";
+import { lspSignatureHelpTooltip } from "$lib/lsp/signature-help";
+import { lspDefinitionHandler, lspGoToDefinitionCommand } from "$lib/lsp/definition";
+import { lspRenameCommand, lspRenameExtension } from "$lib/lsp/rename";
+import { lspCodeActionCommand } from "$lib/lsp/code-action";
 
 /**
  * Holds the theme's CodeMirror extension (chrome + syntax highlighting)
@@ -150,7 +156,16 @@ export function baseExtensions(onSave: () => void, initialTheme: Theme, filePath
     colorChips(),
     lintGutter(),
     themeCompartment.of(buildCmTheme(initialTheme)),
-    ...(filePath ? [lspDiagnostics(pathToFileUri(filePath))] : []),
+    ...(filePath
+      ? [
+        lspDiagnostics(pathToFileUri(filePath)),
+        lspCompletionSource(filePath),
+        lspHoverTooltip(filePath),
+        lspSignatureHelpTooltip(filePath),
+        lspDefinitionHandler(filePath),
+        lspRenameExtension(),
+      ]
+      : []),
     keymap.of([
       {
         key: "Mod-s",
@@ -168,6 +183,13 @@ export function baseExtensions(onSave: () => void, initialTheme: Theme, filePath
       { key: "Alt-ArrowDown", run: moveLineDown },
       { key: "Shift-Alt-ArrowUp", run: copyLineUp },
       { key: "Shift-Alt-ArrowDown", run: copyLineDown },
+      ...(filePath
+        ? [
+          { key: "F12", preventDefault: true, run: lspGoToDefinitionCommand(filePath) },
+          { key: "F2", preventDefault: true, run: lspRenameCommand(filePath) },
+          { key: "Mod-.", preventDefault: true, run: lspCodeActionCommand(filePath) },
+        ]
+        : []),
       ...closeBracketsKeymap,
       ...defaultKeymap,
       ...searchKeymap.filter((binding) => binding.key !== "Mod-f"),

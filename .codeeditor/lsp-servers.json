@@ -1,0 +1,84 @@
+{
+  "servers": {
+    "cpp": {
+      "command": "clangd",
+      "args": [],
+      "rootMarkers": [
+        "CMakeLists.txt",
+        "compile_commands.json"
+      ]
+    },
+    "typescript": {
+      "variants": {
+        "native": {
+          "command": "tsc",
+          "args": [
+            "--lsp",
+            "--stdio"
+          ],
+          "rootMarkers": [
+            "package.json",
+            "tsconfig.json"
+          ]
+        },
+        "classic": {
+          "command": "typescript-language-server",
+          "args": [
+            "--stdio"
+          ],
+          "rootMarkers": [
+            "package.json",
+            "tsconfig.json"
+          ]
+        }
+      },
+      "default": "classic"
+    },
+    "rust": {
+      "command": "rust-analyzer",
+      "args": [],
+      "rootMarkers": [
+        "Cargo.toml"
+      ]
+    },
+    "python": {
+      "command": "pylsp",
+      "args": [],
+      "rootMarkers": [
+        "pyproject.toml",
+        "requirements.txt"
+      ]
+    },
+    "dart": {
+      "command": "dart",
+      "args": [
+        "language-server",
+        "--protocol=lsp"
+      ],
+      "rootMarkers": [
+        "pubspec.yaml"
+      ]
+    },
+    "php": {
+      "command": "intelephense",
+      "args": [
+        "--stdio"
+      ],
+      "rootMarkers": [
+        "composer.json"
+      ]
+    },
+    "go": {
+      "command": "gopls",
+      "args": [],
+      "rootMarkers": [
+        "go.mod"
+      ]
+    }
+  },
+  "rootOverrides": {
+    ".": {
+      "typescript": "native"
+    }
+  }
+}

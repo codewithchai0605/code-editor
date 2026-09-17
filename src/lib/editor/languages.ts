@@ -60,6 +60,7 @@ const loaders: Record<string, LanguageLoader> = {
     const htmlSupport = html({ autoCloseTags: true, matchClosingTags: false });
     return [php({ baseLanguage: htmlSupport.language }), htmlSupport.support];
   },
+  svelte: async () => (await import("@replit/codemirror-lang-svelte")).svelte(),
   env: async () => (await import("./languages/env")).envLanguage,
   prisma: async () => (await import("./languages/prisma")).prismaLanguage,
 };

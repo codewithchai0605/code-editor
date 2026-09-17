@@ -1,6 +1,7 @@
 import { linter, type Diagnostic as CmDiagnostic } from "@codemirror/lint";
-import type { Extension, Text } from "@codemirror/state";
-import type { LspDiagnostic, LspPosition } from "./types";
+import type { Extension } from "@codemirror/state";
+import type { LspDiagnostic } from "./types";
+import { posToOffset } from "./position";
 
 /** uri -> latest diagnostics for that file. A plain module-level Map, not
  *  Svelte `$state` — what needs to observe this is CodeMirror's own
@@ -15,6 +16,14 @@ export function setDiagnosticsForUri(uri: string, diagnostics: LspDiagnostic[]):
 
 export function clearDiagnosticsForUri(uri: string): void {
   cache.delete(uri);
+}
+
+/** Synchronous read of the current cache — used by `codeAction.ts` to
+ *  find diagnostics overlapping the requested range (servers commonly
+ *  only attach quick-fixes to a code action when the request's range
+ *  includes the diagnostic they fix). */
+export function getDiagnosticsForUri(uri: string): LspDiagnostic[] {
+  return cache.get(uri) ?? [];
 }
 
 function severityToString(severity: LspDiagnostic["severity"]): CmDiagnostic["severity"] {
@@ -33,18 +42,6 @@ function severityToString(severity: LspDiagnostic["severity"]): CmDiagnostic["se
       // silently downgrading a potentially serious issue).
       return "error";
   }
-}
-
-/** LSP positions are 0-indexed (line, character); CodeMirror's `Text.line()`
- *  is 1-indexed and works in document offsets. Both endpoints are clamped
- *  to the document's actual bounds — a server can (rarely) report a
- *  position that's stale relative to what's currently on screen, e.g. if
- *  the file changed since the diagnostic was computed. */
-function posToOffset(doc: Text, pos: LspPosition): number {
-  if (pos.line < 0) return 0;
-  if (pos.line >= doc.lines) return doc.length;
-  const line = doc.line(pos.line + 1);
-  return Math.max(line.from, Math.min(line.from + pos.character, line.to));
 }
 
 /**

@@ -1,0 +1,9 @@
+[window/logMessage] Resolved client capabilities: {}
+[window/logMessage] error handling method 'shutdown' (2): ServerNotInitialized
+[window/logMessage] file watching: using builtin in-process watcher (client lacks dynamic watch registration)
+[window/logMessage] Resolved client capabilities: {}
+[window/logMessage] error handling method 'shutdown' (2): ServerNotInitialized
+[window/logMessage] file watching: using builtin in-process watcher (client lacks dynamic watch registration)
+[window/logMessage] Resolved client capabilities: {}
+[window/logMessage] error handling method 'shutdown' (2): ServerNotInitialized
+[window/logMessage] file watching: using builtin in-process watcher (client lacks dynamic watch registration)

@@ -12,9 +12,27 @@
     onClose: () => void;
     emptyLabel?: string;
     row: Snippet<[result: FuzzyResult<T>, active: boolean]>;
+    /** Optional: called with the current query on every change (including
+     *  once on mount, with `""`). Filtering itself always stays client-side
+     *  over `items` (see `results` below) — this is only for a caller that
+     *  wants to *re-fetch* `items` itself as the query changes (e.g.
+     *  `SymbolPalette`'s workspace-symbol search, which re-queries the
+     *  language server rather than filtering a single fixed list the way
+     *  `QuickOpenPalette`'s static file index does). */
+    onQueryChange?: (query: string) => void;
   }
 
-  let { placeholder, items, getText, getKey, onSelect, onClose, emptyLabel = "No results", row }: Props = $props();
+  let {
+    placeholder,
+    items,
+    getText,
+    getKey,
+    onSelect,
+    onClose,
+    emptyLabel = "No results",
+    row,
+    onQueryChange,
+  }: Props = $props();
 
   let query = $state("");
   let activeIndex = $state(0);
@@ -22,6 +40,10 @@
   let listEl: HTMLDivElement | undefined = $state();
 
   const results = $derived(fuzzyFilter(query, items, getText));
+
+  $effect(() => {
+    onQueryChange?.(query);
+  });
 
   // Reset the selection whenever the result set changes shape (new query),
   // so it never points past the end of a shorter list.
@@ -64,7 +86,12 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<div class="backdrop" role="presentation" onclick={onClose} onkeydown={(e) => e.key === "Escape" && onClose()}>
+<div
+  class="backdrop"
+  role="presentation"
+  onclick={onClose}
+  onkeydown={(e) => e.key === "Escape" && onClose()}
+>
   <div
     class="palette"
     role="dialog"
@@ -80,7 +107,12 @@
       aria-label={placeholder}
       onkeydown={onKeydown}
     />
-    <div class="results" bind:this={listEl} role="listbox" aria-label={placeholder}>
+    <div
+      class="results"
+      bind:this={listEl}
+      role="listbox"
+      aria-label={placeholder}
+    >
       {#each results as r, i (getKey(r.item))}
         <button
           class="result"

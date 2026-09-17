@@ -11,10 +11,10 @@ import { lspLanguageIdFor } from "$lib/lsp/languageId";
 import { pathToFileUri } from "$lib/lsp/uri";
 import { lspDidOpen, lspDidChange, lspDidClose } from "$lib/api/lsp";
 import { clearDiagnosticsForUri } from "$lib/lsp/diagnostics";
-import { lspStore } from "$lib/lsp/manager.svelte";
 import { gitStore } from "./git.svelte";
 import { gitFileBaseline } from "$lib/api/git"
 import { setGitBaseline } from "$lib/editor/git-gutter";
+import { lspStore } from "$lib/lsp/manager.svelte";
 
 const LSP_CHANGE_DEBOUNCE_MS = 300;
 
@@ -303,18 +303,59 @@ class EditorStore {
     if (tab && !tab.isDirty) tab.isDirty = true;
   }
 
+  /** The current text of an open tab, without going through a file read —
+   *  `null` if `path` isn't open (or isn't a text tab). Used by
+   *  `lsp/workspaceEdit.ts` to decide whether to apply a `WorkspaceEdit`'s
+   *  edits against the live buffer (open) or read-modify-write the file
+   *  directly on disk (not open) — and, in the open case, as the base
+   *  text LSP positions are converted against. */
+  docTextIfOpen(path: string): string | null {
+    const tab = this.findTab(path);
+    return tab?.kind === "text" && tab.cmState ? tab.cmState.doc.toString() : null;
+  }
+
+  /** Applies a set of non-overlapping `{from, to, insert}` changes
+   *  (offsets against the tab's *current* document) to an already-open
+   *  tab — the "open" half of `lsp/workspaceEdit.ts`'s apply logic; see
+   *  `docTextIfOpen` for why a caller would already know this tab is
+   *  open before calling this. Routes through a real `view.dispatch` for
+   *  the active tab so it goes through the exact same pipeline as the
+   *  user typing (dirty flag, LSP didChange, undo history all included
+   *  for free); an inactive tab's stored state is updated the same way
+   *  `applyThemeToOpenTabs` does, but *without* suppressing dirty
+   *  tracking — unlike a theme swap, this is a real content change. */
+  applyChangesToTab(path: string, changes: { from: number; to: number; insert: string }[]): void {
+    const tab = this.findTab(path);
+    if (!tab?.cmState || changes.length === 0) return;
+
+    if (path === this.activePath && this.activeView) {
+      this.activeView.dispatch({ changes });
+      return;
+    }
+
+    const nextState = tab.cmState.update({ changes }).state;
+    tab.cmState = nextState;
+    this.markDirty(path);
+    this.scheduleLspChange(path);
+  }
+
   /** Fire-and-forget notifications to the LSP backend — errors are logged,
    *  not surfaced to the user, since a missing/crashed language server
    *  should degrade to "no diagnostics/completions for this file", never
    *  block editing. `workspace.rootPath` is guaranteed non-null by the
    *  time any tab can be open (there's no way to open a file without a
    *  workspace first), but the check is kept explicit rather than
-   *  asserted, since "silently skip" is the right failure mode here too. */
+   *  asserted, since "silently skip" is the right failure mode here too.
+   *  The *project* root actually passed to the LSP commands below is
+   *  `lspStore.resolveRootFor`'s job, not `workspace.rootPath` directly —
+   *  see its doc comment for why a multi-root workspace needs that
+   *  extra step. */
 
   private notifyLspOpen(path: string, text: string, attemptsLeft = 3): void {
     const languageId = lspLanguageIdFor(path);
-    const root = workspace.rootPath;
-    if (!languageId || !root) return;
+    const workspaceRoot = workspace.rootPath;
+    if (!languageId || !workspaceRoot) return;
+    const root = lspStore.resolveRootFor(path, languageId, workspaceRoot);
 
     // Starting the server here (rather than eagerly for the whole
     // workspace) is what makes this lazy per-language: most projects only
@@ -363,8 +404,9 @@ class EditorStore {
     const timer = setTimeout(() => {
       this.lspChangeTimers.delete(path);
       const tab = this.findTab(path);
-      const root = workspace.rootPath;
-      if (!tab?.cmState || !root) return;
+      const workspaceRoot = workspace.rootPath;
+      if (!tab?.cmState || !workspaceRoot) return;
+      const root = lspStore.resolveRootFor(path, languageId, workspaceRoot);
       const version = (tab.lspVersion ?? 1) + 1;
       tab.lspVersion = version;
       lspDidChange(root, languageId, pathToFileUri(path), tab.cmState.doc.toString(), version).catch((err) =>
@@ -377,18 +419,20 @@ class EditorStore {
 
   private notifyLspClose(path: string): void {
     const languageId = lspLanguageIdFor(path);
-    const root = workspace.rootPath;
+    const workspaceRoot = workspace.rootPath;
     const timer = this.lspChangeTimers.get(path);
     if (timer) {
       clearTimeout(timer);
       this.lspChangeTimers.delete(path);
     }
     clearDiagnosticsForUri(pathToFileUri(path));
-    if (!languageId || !root) return;
+    if (!languageId || !workspaceRoot) return;
+    const root = lspStore.resolveRootFor(path, languageId, workspaceRoot);
     lspDidClose(root, languageId, pathToFileUri(path)).catch((err) =>
       console.error(`LSP didClose failed for ${path}:`, err),
     );
   }
+
   /** Reconfigures the theme compartment in every open text tab's stored
    *  state — including tabs that aren't currently visible — so a theme
    *  switch applies everywhere at once instead of only the active tab

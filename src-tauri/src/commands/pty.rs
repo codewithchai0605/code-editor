@@ -8,19 +8,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-fn default_shell_command() -> CommandBuilder {
-    if cfg!(windows) {
-        CommandBuilder::new("pwsh")
-    } else {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-        CommandBuilder::new(shell)
-    }
-}
-
 /// Small helper so a panic while holding a lock anywhere in the app doesn't
-/// permanently poison every terminal session behind it. We don't have a
-/// stronger invariant to protect here, so recovering the guard and carrying
-/// on is preferable to every subsequent `.lock()` call panicking forever.
+/// permanently poison every terminal session behind it.
 trait LockRecover<T> {
     fn lock_recover(&self) -> MutexGuard<'_, T>;
 }
@@ -38,35 +27,25 @@ enum ExitReason {
     Failed { message: String },
 }
 
-const FLUSH_INTERVAL: Duration = Duration::from_millis(8);
-const MAX_BUFFERED: usize = 64 * 1024;
-const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(300);
+// Tuned for code editors: 4ms keeps the UI feeling instant,
+// 32KB prevents flooding the Tauri IPC event loop during heavy output.
+const FLUSH_INTERVAL: Duration = Duration::from_millis(4);
+const MAX_BUFFERED: usize = 32 * 1024;
+const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 fn finish_session(app: &AppHandle, id: &str, reason: ExitReason, already_reported: &AtomicBool) {
     if already_reported.swap(true, Ordering::SeqCst) {
         return;
     }
+
     if let Some(state) = app.try_state::<PtyState>() {
-        // Just remove the session - nothing reads an intermediate
-        // `Exited`/`Failed` value before it's gone, so inserting that state
-        // and then immediately removing it was dead code. If the frontend
-        // later needs to observe a terminal's final state before it
-        // disappears, add an explicit "acknowledge" command instead of
-        // reintroducing an insert here.
         state.sessions.lock_recover().remove(id);
     }
+
     let _ = app.emit(&format!("pty:exit:{id}"), reason);
 }
 
 /// Reads PTY output and emits it to the frontend.
-///
-/// This spawns exactly one thread that ever calls `emit` for this session
-/// (the "emitter" below), fed by a channel from the reader. Because there is
-/// only ever one consumer, chunks are always emitted in the order they were
-/// read - the previous design had two independent threads racing to flush
-/// the same buffer, which could reorder output. `rx.recv()` blocks when
-/// there's nothing to send, so an idle terminal now costs zero wakeups
-/// instead of waking up ~125 times a second forever.
 fn spawn_reader_thread(
     app: AppHandle,
     id: String,
@@ -75,6 +54,7 @@ fn spawn_reader_thread(
 ) {
     let (tx, rx) = mpsc::channel::<Vec<u8>>();
 
+    // Emitter thread: batches chunks to minimize Tauri IPC overhead
     {
         let app = app.clone();
         let id = id.clone();
@@ -82,6 +62,7 @@ fn spawn_reader_thread(
             while let Ok(first) = rx.recv() {
                 let mut buf = first;
                 let deadline = Instant::now() + FLUSH_INTERVAL;
+
                 while buf.len() < MAX_BUFFERED {
                     let remaining = deadline.saturating_duration_since(Instant::now());
                     if remaining.is_zero() {
@@ -92,11 +73,13 @@ fn spawn_reader_thread(
                         Err(_) => break,
                     }
                 }
+                // Emit as raw bytes. (Ensure your Tauri frontend expects Uint8Array)
                 let _ = app.emit(&format!("pty:data:{id}"), buf);
             }
         });
     }
 
+    // Reader thread: reads from the PTY and sends to the emitter
     thread::spawn(move || {
         let mut read_buf = [0u8; 8192];
         let exit_reason = loop {
@@ -104,7 +87,6 @@ fn spawn_reader_thread(
                 Ok(0) => break ExitReason::Exited,
                 Ok(n) => {
                     if tx.send(read_buf[..n].to_vec()).is_err() {
-                        // Emitter thread is gone; nothing left to do but stop reading.
                         break ExitReason::Exited;
                     }
                 }
@@ -116,46 +98,33 @@ fn spawn_reader_thread(
             }
         };
 
-        // Drop the sender so the emitter thread's `rx.recv()` returns `Err`
-        // once any already-queued chunks are drained, letting it exit
-        // cleanly instead of lingering.
         drop(tx);
-
         finish_session(&app, &id, exit_reason, &already_reported);
     });
 }
 
-/// Belt-and-suspenders exit detection alongside the reader thread's own
-/// EOF/error handling above. On Windows, ConPTY does not reliably signal
-/// EOF on the read side just because the foreground process exited - so a
-/// shell exiting normally (typing `exit`) could leave `reader.read()`
-/// simply never returning again, even though the process is genuinely
-/// gone.
-///
-/// This asks the child process handle itself (`Child::try_wait`) rather
-/// than snapshotting the whole system process table via `sysinfo`: it's the
-/// same primitive `portable_pty` already uses internally, it's one fewer
-/// dependency, and it sidesteps the (rare, but real) pid-reuse race you get
-/// from looking a raw pid back up in the OS process table.
+/// Belt-and-suspenders exit detection for Windows ConPTY.
 fn spawn_exit_watcher(app: AppHandle, id: String, already_reported: Arc<AtomicBool>) {
     thread::spawn(move || loop {
         thread::sleep(EXIT_POLL_INTERVAL);
         if already_reported.load(Ordering::SeqCst) {
             return;
         }
+
         let Some(state) = app.try_state::<PtyState>() else {
             return;
         };
+
         let exited = {
             let mut sessions = state.sessions.lock_recover();
             match sessions.get_mut(&id) {
                 Some(TerminalSession::Running(pty)) => {
                     matches!(pty.child.try_wait(), Ok(Some(_)))
                 }
-                // Not running anymore (already cleaned up elsewhere) - nothing to watch.
                 _ => true,
             }
         };
+
         if exited {
             finish_session(&app, &id, ExitReason::Exited, &already_reported);
             return;
@@ -170,12 +139,15 @@ fn kill_process_tree(pid: Option<u32>, child: &mut Box<dyn Child + Send + Sync>)
                 .args(["/F", "/T", "/PID", &pid.to_string()])
                 .output()
         } else {
+            // Use SIGTERM instead of SIGKILL to allow processes to clean up gracefully
+            let pid_arg = format!("-{}", pid);
             std::process::Command::new("kill")
-                .args(["-KILL", &format!("-{pid}")])
+                .args(["-TERM", &pid_arg])
                 .output()
         };
         result.map(|o| o.status.success()).unwrap_or(false)
     });
+
     if !tree_kill_ok {
         let _ = child.kill();
     }
@@ -200,6 +172,24 @@ pub fn reserve_terminal_id(pty_state: State<PtyState>) -> String {
         .lock_recover()
         .insert(id.clone(), TerminalSession::Creating);
     id
+}
+
+/// Smart shell detection. Prefers user env vars, falls back gracefully on Windows.
+fn default_shell_command() -> CommandBuilder {
+    if cfg!(windows) {
+        let shell = std::env::var("EDITOR_SHELL").unwrap_or_else(|_| {
+            // Check if PowerShell Core (pwsh) is installed in default location
+            if std::path::Path::new("C:\\Program Files\\PowerShell\\7\\pwsh.exe").exists() {
+                "pwsh".to_string()
+            } else {
+                "powershell.exe".to_string()
+            }
+        });
+        CommandBuilder::new(shell)
+    } else {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+        CommandBuilder::new(shell)
+    }
 }
 
 #[tauri::command]
@@ -236,6 +226,7 @@ pub fn create_terminal(
     let mut child = match pair.slave.spawn_command(cmd) {
         Ok(child) => child,
         Err(_) if cfg!(windows) => {
+            // Fallback for Windows if the preferred shell fails
             let mut fallback = CommandBuilder::new_default_prog();
             if let Some(dir) = &cwd {
                 fallback.cwd(dir);
@@ -255,8 +246,8 @@ pub fn create_terminal(
         .master
         .take_writer()
         .map_err(|e| fail(&pty_state, &id, e))?;
-
     let pid = child.process_id();
+
     {
         let mut sessions = pty_state.sessions.lock_recover();
         if matches!(sessions.get(&id), Some(TerminalSession::Closing)) {
@@ -281,21 +272,21 @@ pub fn create_terminal(
     Ok(())
 }
 
+/// Accepts raw bytes instead of String to prevent UTF-8 validation overhead
+/// and avoid corrupting binary terminal escape sequences.
 #[tauri::command]
 pub fn write_to_terminal(
     pty_state: State<PtyState>,
     id: String,
-    data: String,
+    data: Vec<u8>,
 ) -> Result<(), String> {
     let mut sessions = pty_state.sessions.lock_recover();
     let session = sessions
         .get_mut(&id)
         .ok_or_else(|| "Terminal session not found.".to_string())?;
+
     match session {
-        TerminalSession::Running(pty) => pty
-            .writer
-            .write_all(data.as_bytes())
-            .map_err(|e| e.to_string()),
+        TerminalSession::Running(pty) => pty.writer.write_all(&data).map_err(|e| e.to_string()),
         other => Err(other.describe().to_string()),
     }
 }
@@ -311,9 +302,11 @@ pub fn resize_terminal(
     let session = sessions
         .get(&id)
         .ok_or_else(|| "Terminal session not found.".to_string())?;
+
     let pty = session
         .running()
         .ok_or_else(|| session.describe().to_string())?;
+
     pty.master
         .resize(PtySize {
             rows,
@@ -330,6 +323,7 @@ pub fn close_terminal(pty_state: State<PtyState>, id: String) -> Result<(), Stri
     if !sessions.contains_key(&id) {
         return Ok(());
     }
+
     if let Some(TerminalSession::Running(mut pty)) =
         sessions.insert(id.clone(), TerminalSession::Closing)
     {

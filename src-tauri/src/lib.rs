@@ -53,11 +53,29 @@ pub fn run() {
             commands::process_monitor::register_process,
             commands::process_monitor::unregister_process,
             commands::process_monitor::kill_process,
+            commands::lsp::lsp_detect_roots,
             commands::lsp::lsp_start,
+            commands::lsp::lsp_stop,
+            commands::lsp::lsp_restart,
+            commands::lsp::lsp_stop_all,
+            commands::lsp::lsp_list_servers,
+            commands::lsp::lsp_list_variants,
+            commands::lsp::lsp_set_variant_override,
+            commands::lsp::lsp_get_logs,
             commands::lsp::lsp_did_open,
             commands::lsp::lsp_did_change,
             commands::lsp::lsp_did_close,
-            commands::lsp::lsp_stop,
+            commands::lsp::lsp_completion,
+            commands::lsp::lsp_hover,
+            commands::lsp::lsp_definition,
+            commands::lsp::lsp_references,
+            commands::lsp::lsp_rename,
+            commands::lsp::lsp_code_action,
+            commands::lsp::lsp_execute_command,
+            commands::lsp::lsp_signature_help,
+            commands::lsp::lsp_document_symbols,
+            commands::lsp::lsp_formatting,
+            commands::lsp::lsp_workspace_symbol,
             commands::search::workspace_search,
             commands::search::stop_workspace_search,
             commands::search::workspace_replace_all,
@@ -68,6 +86,9 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 if let Some(pty_state) = app_handle.try_state::<PtyState>() {
                     commands::pty::kill_all_sessions(&pty_state);
+                }
+                if let Some(lsp_manager) = app_handle.try_state::<LspManager>() {
+                    lsp_manager.kill_all_blocking();
                 }
             }
         });

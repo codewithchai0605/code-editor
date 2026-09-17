@@ -8,6 +8,7 @@
   import { markdownPreviewStore } from "$lib/stores/markdownPreview.svelte";
   import { workspaceSearchStore } from "$lib/stores/workspaceSearch.svelte";
   import { registerCoreCommands } from "$lib/commands/coreCommands";
+  import { formatActiveDocument } from "$lib/lsp/format";
   import ActivityBar from "./ActivityBar.svelte";
   import Sidebar from "./Sidebar.svelte";
   import EditorArea from "./EditorArea.svelte";
@@ -16,6 +17,8 @@
   import ResizeHandle from "./ResizeHandle.svelte";
   import PaletteHost from "./PaletteHost.svelte";
   import ToastHost from "./ToastHost.svelte";
+  import ContextMenu from "./ContextMenu.svelte";
+  import { codeActionMenuState } from "$lib/lsp/code-action-menu.svelte";
 
   onMount(() => {
     themeStore.applyInitial();
@@ -51,12 +54,21 @@
       } else if (e.key.toLowerCase() === "v" && e.shiftKey) {
         e.preventDefault();
         markdownPreviewStore.toggle();
+      } else if (e.key.toLowerCase() === "f" && e.altKey && e.shiftKey) {
+        e.preventDefault();
+        void formatActiveDocument();
       } else if (e.key.toLowerCase() === "f" && e.shiftKey) {
         e.preventDefault();
         if (workspace.rootPath) layout.setActiveView("search");
       } else if (e.key.toLowerCase() === "p") {
         e.preventDefault();
         if (workspace.rootPath) paletteState.toggle("quickOpen");
+      } else if (e.key.toLowerCase() === "o" && e.shiftKey) {
+        e.preventDefault();
+        if (editorStore.activeTab) paletteState.toggle("documentSymbols");
+      } else if (e.key.toLowerCase() === "t") {
+        e.preventDefault();
+        if (workspace.rootPath) paletteState.toggle("workspaceSymbols");
       }
     }
     window.addEventListener("keydown", onKeydown);
@@ -104,6 +116,17 @@
 
 <PaletteHost />
 <ToastHost />
+
+{#if codeActionMenuState.request}
+  {#key codeActionMenuState.request}
+    <ContextMenu
+      x={codeActionMenuState.request.x}
+      y={codeActionMenuState.request.y}
+      items={codeActionMenuState.request.items}
+      onClose={() => codeActionMenuState.close()}
+    />
+  {/key}
+{/if}
 
 <style>
   .shell {

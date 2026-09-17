@@ -13,6 +13,13 @@ import {
 import { selectNextOccurrence } from "@codemirror/search";
 import { goToNextGitChange, goToPreviousGitChange } from "$lib/editor/git-gutter";
 import type { EditorView } from "@codemirror/view";
+import { lspStore } from "$lib/lsp/manager.svelte";
+import { lspLanguageIdFor } from "$lib/lsp/languageId";
+import { goToDefinition } from "$lib/lsp/definition";
+import { formatActiveDocument } from "$lib/lsp/format";
+import { lspRenameCommand } from "$lib/lsp/rename";
+import { lspCodeActionCommand } from "$lib/lsp/code-action";
+import { toastStore } from "$lib/stores/toast.svelte";
 
 /** Runs a CodeMirror command against the currently-visible editor, if
  *  there is one — the shared wrapper every editor-scoped command below
@@ -141,6 +148,74 @@ export function registerCoreCommands(): () => void {
       title: "Markdown: Toggle Preview",
       keybinding: "Ctrl+Shift+V",
       run: () => markdownPreviewStore.toggle(),
+    }),
+    commandRegistry.register({
+      id: "lsp.goToDefinition",
+      title: "Go to Definition",
+      keybinding: "F12",
+      run: () => {
+        const tab = editorStore.activeTab;
+        if (tab && editorStore.view) void goToDefinition(tab.path, editorStore.view.state.selection.main.head, editorStore.view.state.doc);
+      },
+    }),
+    commandRegistry.register({
+      id: "lsp.renameSymbol",
+      title: "Rename Symbol",
+      keybinding: "F2",
+      run: () => {
+        const tab = editorStore.activeTab;
+        if (tab && editorStore.view) lspRenameCommand(tab.path)(editorStore.view);
+      },
+    }),
+    commandRegistry.register({
+      id: "lsp.codeAction",
+      title: "Code Action...",
+      keybinding: "Ctrl+.",
+      run: () => {
+        const tab = editorStore.activeTab;
+        if (tab && editorStore.view) lspCodeActionCommand(tab.path)(editorStore.view);
+      },
+    }),
+    commandRegistry.register({
+      id: "editor.formatDocument",
+      title: "Format Document",
+      keybinding: "Ctrl+Shift+Alt+F",
+      run: () => void formatActiveDocument(),
+    }),
+    commandRegistry.register({
+      id: "lsp.goToSymbolInFile",
+      title: "Go to Symbol in File...",
+      keybinding: "Ctrl+Shift+O",
+      run: () => {
+        if (editorStore.activeTab) paletteState.open("documentSymbols");
+      },
+    }),
+    commandRegistry.register({
+      id: "lsp.goToSymbolInWorkspace",
+      title: "Go to Symbol in Workspace...",
+      keybinding: "Ctrl+T",
+      run: () => {
+        if (workspace.rootPath) paletteState.open("workspaceSymbols");
+      },
+    }),
+    commandRegistry.register({
+      id: "lsp.restartServer",
+      title: "LSP: Restart Server for Current File",
+      run: () => {
+        const tab = editorStore.activeTab;
+        const workspaceRoot = workspace.rootPath;
+        const languageId = tab && lspLanguageIdFor(tab.path);
+        if (!tab || !workspaceRoot || !languageId) {
+          toastStore.info("No language server is associated with the current file.");
+          return;
+        }
+        void lspStore.restartServer(lspStore.resolveRootFor(tab.path, languageId, workspaceRoot), languageId);
+      },
+    }),
+    commandRegistry.register({
+      id: "lsp.stopAllServers",
+      title: "LSP: Stop All Servers",
+      run: () => void lspStore.stopAllServers(),
     }),
   ];
 
