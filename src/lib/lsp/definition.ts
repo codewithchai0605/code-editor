@@ -23,7 +23,9 @@ function normalizeLocations(result: unknown): LspLocation[] {
     if (!result) return [];
     const items: Array<LspLocation | LspLocationLink> = Array.isArray(result) ? result : [result];
     return items.map((item) =>
-        isLocationLink(item) ? { uri: item.targetUri, range: item.targetSelectionRange ?? item.targetRange } : item,
+        isLocationLink(item)
+            ? { uri: item.targetUri, range: item.targetSelectionRange ?? item.targetRange }
+            : item,
     );
 }
 
@@ -57,7 +59,12 @@ export async function goToDefinition(filePath: string, pos: number, doc: Text): 
     // *target* file's own coordinates — no need to load that file's `Text`
     // first just to convert a range, the way `posToOffset` elsewhere needs
     // to for the *current* file.
-    await editorStore.openAndReveal(fileUriToPath(target.uri), target.range.start.line + 1, target.range.start.character, target.range.end.character);
+    await editorStore.openAndReveal(
+        fileUriToPath(target.uri),
+        target.range.start.line + 1,
+        target.range.start.character,
+        target.range.end.character,
+    );
 }
 
 /** Ctrl/Cmd+Click-to-definition — the mouse-driven counterpart to the F12

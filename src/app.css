@@ -5,138 +5,138 @@
  * is what makes that swap easy later instead of a rewrite.
  */
 :root {
-  color-scheme: dark;
+    color-scheme: dark;
 
-  /* Chrome surfaces */
-  --color-bg: #1e1e1e;
-  --color-bg-elevated: #2d2d2d;
-  --color-bg-sidebar: #252526;
-  --color-bg-activitybar: #333333;
-  --color-bg-statusbar: #007acc;
-  --color-statusbar-text: #ffffff;
-  --color-bg-hover: rgba(255, 255, 255, 0.08);
+    /* Chrome surfaces */
+    --color-bg: #1e1e1e;
+    --color-bg-elevated: #2d2d2d;
+    --color-bg-sidebar: #252526;
+    --color-bg-activitybar: #333333;
+    --color-bg-statusbar: #007acc;
+    --color-statusbar-text: #ffffff;
+    --color-bg-hover: rgba(255, 255, 255, 0.08);
 
-  /* Borders & text */
-  --color-border: #2b2b2b;
-  --color-text: #cccccc;
-  --color-text-muted: #969696;
-  --color-text-faint: #6b6b6b;
-  --color-accent: #007acc;
-  --color-focus-ring: #007fd4;
+    /* Borders & text */
+    --color-border: #2b2b2b;
+    --color-text: #cccccc;
+    --color-text-muted: #969696;
+    --color-text-faint: #6b6b6b;
+    --color-accent: #007acc;
+    --color-focus-ring: #007fd4;
 
-  /* Typography */
-  --font-ui: -apple-system, "Segoe UI", system-ui, Ubuntu, sans-serif;
-  --font-mono: "Cascadia Code", Consolas, "SFMono-Regular", Menlo, monospace;
-  --font-size-ui: 13px;
+    /* Typography */
+    --font-ui: -apple-system, "Segoe UI", system-ui, Ubuntu, sans-serif;
+    --font-mono: "Cascadia Code", Consolas, "SFMono-Regular", Menlo, monospace;
+    --font-size-ui: 13px;
 
-  /* Layout constants shared between CSS and TS (kept in sync manually) */
-  --activitybar-width: 48px;
-  --statusbar-height: 22px;
-  --tabbar-height: 35px;
+    /* Layout constants shared between CSS and TS (kept in sync manually) */
+    --activitybar-width: 48px;
+    --statusbar-height: 22px;
+    --tabbar-height: 35px;
 }
 
 *,
 *::before,
 *::after {
-  box-sizing: border-box;
+    box-sizing: border-box;
 }
 
 html,
 body {
-  height: 100%;
-  margin: 0;
-  /* The window chrome scrolls nowhere; individual panes scroll internally. */
-  overflow: hidden;
-  overscroll-behavior: none;
+    height: 100%;
+    margin: 0;
+    /* The window chrome scrolls nowhere; individual panes scroll internally. */
+    overflow: hidden;
+    overscroll-behavior: none;
 }
 
 body {
-  font-family: var(--font-ui);
-  font-size: var(--font-size-ui);
-  color: var(--color-text);
-  background: var(--color-bg);
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+    font-family: var(--font-ui);
+    font-size: var(--font-size-ui);
+    color: var(--color-text);
+    background: var(--color-bg);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
 }
 
 button,
 input,
 textarea,
 select {
-  font-family: inherit;
-  color: inherit;
+    font-family: inherit;
+    color: inherit;
 }
 
 button {
-  background: none;
-  border: none;
+    background: none;
+    border: none;
 }
 
 :focus-visible {
-  outline: 1px solid var(--color-focus-ring);
-  outline-offset: -1px;
+    outline: 1px solid var(--color-focus-ring);
+    outline-offset: -1px;
 }
 
 /* Thin, VS Code-like scrollbars. Webkit-prefixed rules work fine since both
    WebView2 (Windows) and WebKitGTK (Linux) are Chromium/WebKit-based. */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+    width: 10px;
+    height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+    background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: #4a4a4a;
-  background-clip: content-box;
-  border: 2px solid transparent;
-  border-radius: 5px;
+    background-color: #4a4a4a;
+    background-clip: content-box;
+    border: 2px solid transparent;
+    border-radius: 5px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: #5a5a5a;
-  background-clip: content-box;
+    background-color: #5a5a5a;
+    background-clip: content-box;
 }
 
 ::-webkit-scrollbar-corner {
-  background: transparent;
+    background: transparent;
 }
 
 /* Toggled on <body> for the duration of an in-tree drag (see FileTree.svelte)
    so the cursor reads as "grabbing" no matter what's underneath it. */
 body.dragging-tree-item,
 body.dragging-tree-item * {
-  cursor: grabbing !important;
+    cursor: grabbing !important;
 }
 
 .cm-foldGutter {
-  width: 18px;
+    width: 18px;
 }
 
 .cm-foldGutter .cm-gutterElement {
-  padding: 0;
+    padding: 0;
 }
 
 .fold-marker {
-  width: 18px;
-  height: 100%;
+    width: 18px;
+    height: 100%;
 
-  display: flex;
-  align-items: center;
-  justify-content: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 
-  opacity: 0.75;
-  cursor: pointer;
+    opacity: 0.75;
+    cursor: pointer;
 
-  transition: opacity 100ms ease;
+    transition: opacity 100ms ease;
 }
 
 .cm-foldGutter .cm-gutterElement:hover .fold-marker {
-  opacity: 0.75;
+    opacity: 0.75;
 }
 
 .fold-marker:hover {
-  opacity: 1 !important;
+    opacity: 1 !important;
 }

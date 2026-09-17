@@ -27,7 +27,12 @@ function rangesOverlap(a: LspRange, b: LspRange): boolean {
     return key(a.start) <= key(b.end) && key(b.start) <= key(a.end);
 }
 
-async function runCommand(root: string, languageId: string, command: LspCommand, actionTitle: string): Promise<void> {
+async function runCommand(
+    root: string,
+    languageId: string,
+    command: LspCommand,
+    actionTitle: string,
+): Promise<void> {
     try {
         await lspExecuteCommand(root, languageId, command.command, command.arguments ?? []);
     } catch (err) {
@@ -35,7 +40,11 @@ async function runCommand(root: string, languageId: string, command: LspCommand,
     }
 }
 
-async function applyChosenAction(root: string, languageId: string, action: LspCodeActionOrCommand): Promise<void> {
+async function applyChosenAction(
+    root: string,
+    languageId: string,
+    action: LspCodeActionOrCommand,
+): Promise<void> {
     if (isBareCommand(action)) {
         await runCommand(root, languageId, action, action.title);
         return;

@@ -12,12 +12,12 @@
  * `document.elementFromPoint`) resolving OS drop targets.
  */
 class DndState {
-  draggingPaths = $state<string[] | null>(null);
-  dropTargetPath = $state<string | null>(null);
-  /** Cursor position + label while dragging, for the floating ghost badge
-   *  that shows what's being dragged (see FileTree.svelte). */
-  pointer = $state<{ x: number; y: number } | null>(null);
-  label = $state("");
+    draggingPaths = $state<string[] | null>(null);
+    dropTargetPath = $state<string | null>(null);
+    /** Cursor position + label while dragging, for the floating ghost badge
+     *  that shows what's being dragged (see FileTree.svelte). */
+    pointer = $state<{ x: number; y: number } | null>(null);
+    label = $state("");
 }
 
 export const dnd = new DndState();

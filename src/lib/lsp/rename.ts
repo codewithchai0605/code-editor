@@ -42,7 +42,12 @@ function wordRangeAt(view: EditorView, pos: number): { from: number; to: number 
     return { from: line.from + from, to: line.from + to };
 }
 
-async function performRename(view: EditorView, filePath: string, pos: number, newName: string): Promise<void> {
+async function performRename(
+    view: EditorView,
+    filePath: string,
+    pos: number,
+    newName: string,
+): Promise<void> {
     const languageId = lspLanguageIdFor(filePath);
     const workspaceRoot = workspace.rootPath;
     if (!languageId || !workspaceRoot) return;
@@ -92,7 +97,8 @@ export function lspRenameCommand(filePath: string): (view: EditorView) => boolea
                 event.preventDefault();
                 const newName = input.value.trim();
                 close();
-                if (newName && newName !== currentName) void performRename(view, filePath, from, newName);
+                if (newName && newName !== currentName)
+                    void performRename(view, filePath, from, newName);
             } else if (event.key === "Escape") {
                 event.preventDefault();
                 close();

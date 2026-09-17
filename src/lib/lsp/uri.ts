@@ -2,9 +2,9 @@
  *  possibly backslash-separated on Windows) to a `file://` URI matching
  *  what `lsp_types::Uri` parses on the Rust side. */
 export function pathToFileUri(path: string): string {
-  const normalized = path.replace(/\\/g, "/");
-  const withLeadingSlash = normalized.startsWith("/") ? normalized : `/${normalized}`;
-  return `file://${withLeadingSlash}`;
+    const normalized = path.replace(/\\/g, "/");
+    const withLeadingSlash = normalized.startsWith("/") ? normalized : `/${normalized}`;
+    return `file://${withLeadingSlash}`;
 }
 
 /** The inverse of `pathToFileUri` — a `file://` URI (as sent back by a
@@ -15,10 +15,10 @@ export function pathToFileUri(path: string): string {
  *  (paths handed to it come straight from the Rust fs commands, never
  *  through a URL). */
 export function fileUriToPath(uri: string): string {
-  const withoutScheme = uri.replace(/^file:\/\//, "");
-  try {
-    return decodeURIComponent(withoutScheme);
-  } catch {
-    return withoutScheme;
-  }
+    const withoutScheme = uri.replace(/^file:\/\//, "");
+    try {
+        return decodeURIComponent(withoutScheme);
+    } catch {
+        return withoutScheme;
+    }
 }

@@ -1,4 +1,10 @@
-import { EditorView, ViewPlugin, type ViewUpdate, type Tooltip, showTooltip } from "@codemirror/view";
+import {
+    EditorView,
+    ViewPlugin,
+    type ViewUpdate,
+    type Tooltip,
+    showTooltip,
+} from "@codemirror/view";
 import { StateField, StateEffect, type Extension } from "@codemirror/state";
 import { lspSignatureHelp } from "$lib/api/lsp";
 import { lspStore } from "./manager.svelte";
@@ -61,7 +67,10 @@ const signatureTooltipField = StateField.define<Tooltip | null>({
     provide: (field) => showTooltip.from(field),
 });
 
-function activeParamRange(signature: SignatureInformation, activeParameter: number | undefined): [number, number] | null {
+function activeParamRange(
+    signature: SignatureInformation,
+    activeParameter: number | undefined,
+): [number, number] | null {
     if (activeParameter === undefined) return null;
     const param = signature.parameters?.[activeParameter];
     if (!param) return null;
@@ -99,7 +108,9 @@ function buildDom(result: SignatureHelpResult): HTMLElement {
     }
 
     const activeDoc =
-        activeParameter !== undefined ? documentationText(signature.parameters?.[activeParameter]?.documentation) : documentationText(signature.documentation);
+        activeParameter !== undefined
+            ? documentationText(signature.parameters?.[activeParameter]?.documentation)
+            : documentationText(signature.documentation);
     if (activeDoc) {
         const docEl = document.createElement("div");
         docEl.className = "cm-lsp-sig-doc";
@@ -123,7 +134,9 @@ function buildPlugin(filePath: string) {
                 const view = update.view;
                 const pos = view.state.selection.main.head;
 
-                const typedChar = update.docChanged ? view.state.sliceDoc(Math.max(0, pos - 1), pos) : "";
+                const typedChar = update.docChanged
+                    ? view.state.sliceDoc(Math.max(0, pos - 1), pos)
+                    : "";
                 const alreadyShowing = view.state.field(signatureTooltipField, false) != null;
                 if (!TRIGGER_CHARS.has(typedChar) && !alreadyShowing) return;
 
@@ -153,7 +166,9 @@ function buildPlugin(filePath: string) {
                 }
 
                 const dom = buildDom(result);
-                view.dispatch({ effects: setSignatureTooltip.of({ pos, above: true, create: () => ({ dom }) }) });
+                view.dispatch({
+                    effects: setSignatureTooltip.of({ pos, above: true, create: () => ({ dom }) }),
+                });
             }
         },
     );

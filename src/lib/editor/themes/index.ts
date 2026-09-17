@@ -13,21 +13,20 @@ import { ayuLightTheme } from "./ayu-light";
 export type { Theme, ThemeColors } from "./types";
 
 export const themes: Theme[] = [
-  vscodeDarkTheme,
-  draculaTheme,
-  monokaiTheme,
-  ayuLightTheme,
-  oneDarkTheme,
-  oneLightTheme,
-  nordTheme,
-  tokyoNightTheme,
-  githubLightTheme,
-  solarizedLightTheme
+    vscodeDarkTheme,
+    draculaTheme,
+    monokaiTheme,
+    ayuLightTheme,
+    oneDarkTheme,
+    oneLightTheme,
+    nordTheme,
+    tokyoNightTheme,
+    githubLightTheme,
+    solarizedLightTheme,
 ];
 
-
 export const themesById: Record<string, Theme> = Object.fromEntries(
-  themes.map((theme) => [theme.id, theme]),
+    themes.map((theme) => [theme.id, theme]),
 );
 
 export const defaultTheme: Theme = vscodeDarkTheme;

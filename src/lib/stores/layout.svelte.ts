@@ -24,76 +24,76 @@ const PANEL_MAX_WINDOW_RATIO = 0.7;
 const NARROW_BREAKPOINT = 680;
 
 class LayoutState {
-  sidebarWidth = $state(SIDEBAR_DEFAULT);
-  sidebarOpen = $state(true);
-  /** True once we've auto-collapsed the sidebar due to width — lets us tell
-   *  "user closed it" apart from "we closed it for them" when the window
-   *  grows back. */
-  private sidebarCollapsedByWidth = $state(false);
+    sidebarWidth = $state(SIDEBAR_DEFAULT);
+    sidebarOpen = $state(true);
+    /** True once we've auto-collapsed the sidebar due to width — lets us tell
+     *  "user closed it" apart from "we closed it for them" when the window
+     *  grows back. */
+    private sidebarCollapsedByWidth = $state(false);
 
-  panelHeight = $state(PANEL_DEFAULT);
-  panelOpen = $state(false);
+    panelHeight = $state(PANEL_DEFAULT);
+    panelOpen = $state(false);
 
-  activeView = $state<ActivityView>("explorer");
+    activeView = $state<ActivityView>("explorer");
 
-  windowWidth = $state(typeof window !== "undefined" ? window.innerWidth : 1280);
-  windowHeight = $state(typeof window !== "undefined" ? window.innerHeight : 800);
+    windowWidth = $state(typeof window !== "undefined" ? window.innerWidth : 1280);
+    windowHeight = $state(typeof window !== "undefined" ? window.innerHeight : 800);
 
-  get isNarrow(): boolean {
-    return this.windowWidth < NARROW_BREAKPOINT;
-  }
-
-  /** What should actually render, folding in the auto-collapse rule. */
-  get effectiveSidebarOpen(): boolean {
-    return this.sidebarOpen;
-  }
-
-  /** Call from a `window.resize` listener (see Shell.svelte). */
-  setWindowSize(width: number, height: number): void {
-    this.windowWidth = width;
-    this.windowHeight = height;
-
-    // Re-clamp existing sizes against the new window — without this, a
-    // sidebar/panel sized for a large monitor would overflow a smaller one.
-    this.setSidebarWidth(this.sidebarWidth);
-    this.setPanelHeight(this.panelHeight);
-
-    if (width < NARROW_BREAKPOINT && this.sidebarOpen && !this.sidebarCollapsedByWidth) {
-      this.sidebarCollapsedByWidth = true;
-      this.sidebarOpen = false;
-    } else if (width >= NARROW_BREAKPOINT) {
-      this.sidebarCollapsedByWidth = false;
+    get isNarrow(): boolean {
+        return this.windowWidth < NARROW_BREAKPOINT;
     }
-  }
 
-  toggleSidebar(): void {
-    this.sidebarOpen = !this.sidebarOpen;
-  }
-
-  togglePanel(): void {
-    this.panelOpen = !this.panelOpen;
-  }
-
-  /** Activity bar icon click: switch view, or collapse if clicking the active one. */
-  setActiveView(view: ActivityView): void {
-    if (this.activeView === view && this.sidebarOpen) {
-      this.sidebarOpen = false;
-      return;
+    /** What should actually render, folding in the auto-collapse rule. */
+    get effectiveSidebarOpen(): boolean {
+        return this.sidebarOpen;
     }
-    this.activeView = view;
-    this.sidebarOpen = true;
-  }
 
-  setSidebarWidth(px: number): void {
-    const maxForWindow = this.windowWidth * SIDEBAR_MAX_WINDOW_RATIO;
-    const max = Math.min(SIDEBAR_MAX, maxForWindow);
-    this.sidebarWidth = Math.min(max, Math.max(SIDEBAR_MIN, px));
-  }
+    /** Call from a `window.resize` listener (see Shell.svelte). */
+    setWindowSize(width: number, height: number): void {
+        this.windowWidth = width;
+        this.windowHeight = height;
 
-  setPanelHeight(px: number): void {
-    const maxForWindow = this.windowHeight * PANEL_MAX_WINDOW_RATIO;
-    this.panelHeight = Math.min(maxForWindow, Math.max(PANEL_MIN, px));
-  }
+        // Re-clamp existing sizes against the new window — without this, a
+        // sidebar/panel sized for a large monitor would overflow a smaller one.
+        this.setSidebarWidth(this.sidebarWidth);
+        this.setPanelHeight(this.panelHeight);
+
+        if (width < NARROW_BREAKPOINT && this.sidebarOpen && !this.sidebarCollapsedByWidth) {
+            this.sidebarCollapsedByWidth = true;
+            this.sidebarOpen = false;
+        } else if (width >= NARROW_BREAKPOINT) {
+            this.sidebarCollapsedByWidth = false;
+        }
+    }
+
+    toggleSidebar(): void {
+        this.sidebarOpen = !this.sidebarOpen;
+    }
+
+    togglePanel(): void {
+        this.panelOpen = !this.panelOpen;
+    }
+
+    /** Activity bar icon click: switch view, or collapse if clicking the active one. */
+    setActiveView(view: ActivityView): void {
+        if (this.activeView === view && this.sidebarOpen) {
+            this.sidebarOpen = false;
+            return;
+        }
+        this.activeView = view;
+        this.sidebarOpen = true;
+    }
+
+    setSidebarWidth(px: number): void {
+        const maxForWindow = this.windowWidth * SIDEBAR_MAX_WINDOW_RATIO;
+        const max = Math.min(SIDEBAR_MAX, maxForWindow);
+        this.sidebarWidth = Math.min(max, Math.max(SIDEBAR_MIN, px));
+    }
+
+    setPanelHeight(px: number): void {
+        const maxForWindow = this.windowHeight * PANEL_MAX_WINDOW_RATIO;
+        this.panelHeight = Math.min(maxForWindow, Math.max(PANEL_MIN, px));
+    }
 }
 
 export const layout = new LayoutState();

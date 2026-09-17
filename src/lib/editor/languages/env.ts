@@ -3,31 +3,31 @@ import { StreamLanguage, type StringStream } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 
 const COMMON_ENV_VARS = [
-    ['NODE_ENV', 'Defines the environment mode'],
-    ['PORT', 'Server listening port'],
-    ['HOST', 'Host binding'],
-    ['DATABASE_URL', 'Primary database connection string'],
-    ['MONGO_URI', 'MongoDB connection string'],
-    ['MONGODB_URI', 'MongoDB connection string'],
-    ['REDIS_URL', 'Redis cache connection string'],
-    ['JWT_SECRET', 'Secret key for JSON Web Tokens'],
-    ['JWT_EXPIRES_IN', 'JWT expiration time'],
-    ['API_KEY', 'General API Key'],
-    ['SECRET_KEY', 'General secret key'],
-    ['NEXT_PUBLIC_API_URL', 'Next.js exposed API URL'],
-    ['NEXTAUTH_URL', 'NextAuth base URL'],
-    ['NEXTAUTH_SECRET', 'NextAuth secret'],
-    ['AWS_ACCESS_KEY_ID', 'AWS access key'],
-    ['AWS_SECRET_ACCESS_KEY', 'AWS secret key'],
-    ['AWS_REGION', 'AWS default region'],
-    ['CLOUDINARY_API_KEY', 'Cloudinary API key'],
-    ['CLOUDINARY_API_SECRET', 'Cloudinary API secret'],
-    ['CLOUDINARY_CLOUD_NAME', 'Cloudinary cloud name'],
-    ['STRIPE_SECRET_KEY', 'Stripe secret key'],
-    ['STRIPE_WEBHOOK_SECRET', 'Stripe webhook secret'],
-    ['GOOGLE_CLIENT_ID', 'Google OAuth client id'],
-    ['GOOGLE_CLIENT_SECRET', 'Google OAuth client secret'],
-    ['SENTRY_DSN', 'Sentry data source name'],
+    ["NODE_ENV", "Defines the environment mode"],
+    ["PORT", "Server listening port"],
+    ["HOST", "Host binding"],
+    ["DATABASE_URL", "Primary database connection string"],
+    ["MONGO_URI", "MongoDB connection string"],
+    ["MONGODB_URI", "MongoDB connection string"],
+    ["REDIS_URL", "Redis cache connection string"],
+    ["JWT_SECRET", "Secret key for JSON Web Tokens"],
+    ["JWT_EXPIRES_IN", "JWT expiration time"],
+    ["API_KEY", "General API Key"],
+    ["SECRET_KEY", "General secret key"],
+    ["NEXT_PUBLIC_API_URL", "Next.js exposed API URL"],
+    ["NEXTAUTH_URL", "NextAuth base URL"],
+    ["NEXTAUTH_SECRET", "NextAuth secret"],
+    ["AWS_ACCESS_KEY_ID", "AWS access key"],
+    ["AWS_SECRET_ACCESS_KEY", "AWS secret key"],
+    ["AWS_REGION", "AWS default region"],
+    ["CLOUDINARY_API_KEY", "Cloudinary API key"],
+    ["CLOUDINARY_API_SECRET", "Cloudinary API secret"],
+    ["CLOUDINARY_CLOUD_NAME", "Cloudinary cloud name"],
+    ["STRIPE_SECRET_KEY", "Stripe secret key"],
+    ["STRIPE_WEBHOOK_SECRET", "Stripe webhook secret"],
+    ["GOOGLE_CLIENT_ID", "Google OAuth client id"],
+    ["GOOGLE_CLIENT_SECRET", "Google OAuth client secret"],
+    ["SENTRY_DSN", "Sentry data source name"],
 ];
 
 const standardEnvVars = new Set(COMMON_ENV_VARS.map(([name]) => name));
@@ -40,35 +40,34 @@ const envCompletions = (context: CompletionContext) => {
     return {
         from: word.from,
         options: [
-            ...COMMON_ENV_VARS.map(([label, info]) => ({ label, type: 'constant', info })),
-            { label: 'production', type: 'text', info: 'Production environment' },
-            { label: 'development', type: 'text', info: 'Development environment' },
-            { label: 'test', type: 'text', info: 'Test environment' },
-            { label: 'true', type: 'keyword' },
-            { label: 'false', type: 'keyword' },
-            { label: 'null', type: 'keyword' },
+            ...COMMON_ENV_VARS.map(([label, info]) => ({ label, type: "constant", info })),
+            { label: "production", type: "text", info: "Production environment" },
+            { label: "development", type: "text", info: "Development environment" },
+            { label: "test", type: "text", info: "Test environment" },
+            { label: "true", type: "keyword" },
+            { label: "false", type: "keyword" },
+            { label: "null", type: "keyword" },
             snippetCompletion(
                 'DATABASE_URL="${1:postgresql://user:password@localhost:5432/mydb}"',
                 {
-                    label: 'db_url',
-                    type: 'keyword',
-                    info: 'Generate Postgres URL template',
-                }
+                    label: "db_url",
+                    type: "keyword",
+                    info: "Generate Postgres URL template",
+                },
             ),
             snippetCompletion('REDIS_URL="${1:redis://localhost:6379}"', {
-                label: 'redis_url',
-                type: 'keyword',
-                info: 'Generate Redis URL template',
+                label: "redis_url",
+                type: "keyword",
+                info: "Generate Redis URL template",
             }),
             snippetCompletion('${1:API_KEY}="${2:your_secret_here}"', {
-                label: 'secret_var',
-                type: 'snippet',
-                info: 'Generate a secret variable entry',
+                label: "secret_var",
+                type: "snippet",
+                info: "Generate a secret variable entry",
             }),
         ],
     };
 };
-
 
 export const envLanguage = StreamLanguage.define({
     startState() {
@@ -86,30 +85,30 @@ export const envLanguage = StreamLanguage.define({
                     state.inString = null;
                     break;
                 }
-                escaped = !escaped && char === '\\';
+                escaped = !escaped && char === "\\";
             }
-            return 'string';
+            return "string";
         }
 
-        if (stream.peek() === '#') {
+        if (stream.peek() === "#") {
             const remaining = stream.string.slice(stream.pos);
             if (/^#\s*(TODO|FIXME|BUG|NOTE|HACK):?/i.test(remaining)) {
                 stream.skipToEnd();
-                return 'todoComment';
+                return "todoComment";
             }
             stream.skipToEnd();
-            return 'comment';
+            return "comment";
         }
 
-        if (!state.afterEquals && stream.match(/^export\b/)) return 'keyword';
+        if (!state.afterEquals && stream.match(/^export\b/)) return "keyword";
 
         if (!state.afterEquals && stream.match(/^[A-Za-z_][A-Za-z0-9_]*/)) {
-            return standardEnvVars.has(stream.current()) ? 'standardVariable' : 'variableName';
+            return standardEnvVars.has(stream.current()) ? "standardVariable" : "variableName";
         }
 
-        if (!state.afterEquals && stream.eat('=')) {
+        if (!state.afterEquals && stream.eat("=")) {
             state.afterEquals = true;
-            return 'operator';
+            return "operator";
         }
 
         if (state.afterEquals) {
@@ -117,19 +116,19 @@ export const envLanguage = StreamLanguage.define({
             if (char === '"' || char === "'") {
                 state.inString = char;
                 stream.next();
-                return 'string';
+                return "string";
             }
-            if (stream.match(/^(true|false|yes|no|on|off)\b/i)) return 'bool';
-            if (stream.match(/^(null|undefined)\b/i)) return 'null';
-            if (stream.match(/^https?:\/\/[^\s#]+/)) return 'url';
+            if (stream.match(/^(true|false|yes|no|on|off)\b/i)) return "bool";
+            if (stream.match(/^(null|undefined)\b/i)) return "null";
+            if (stream.match(/^https?:\/\/[^\s#]+/)) return "url";
             if (
                 stream.match(/^\$[A-Za-z_][A-Za-z0-9_]*/) ||
                 stream.match(/^\$\{[A-Za-z_][A-Za-z0-9_]*\}/)
             )
-                return 'envRef';
+                return "envRef";
             if (stream.match(/^0x[a-fA-F0-9]+/i) || stream.match(/^-?\d*\.?\d+(e[+-]?\d+)?/i))
-                return 'number';
-            if (stream.match(/^[^'"\s#]+/)) return 'string';
+                return "number";
+            if (stream.match(/^[^'"\s#]+/)) return "string";
         }
 
         stream.next();
@@ -150,9 +149,7 @@ export const envLanguage = StreamLanguage.define({
         url: tags.link,
         envRef: tags.special(tags.variableName),
     },
-    blankLine(state) {
-
-    },
+    blankLine(state) {},
     languageData: {
         // The key here must be "autocomplete" (a `CompletionSource`), which
         // is what CodeMirror's own `autocompletion()` extension (already
@@ -164,6 +161,6 @@ export const envLanguage = StreamLanguage.define({
         // extension never saw `envCompletions`, so env-file autocomplete
         // was silently inert.
         autocomplete: envCompletions,
-        commentTokens: { line: "#" }
-    }
-})
+        commentTokens: { line: "#" },
+    },
+});

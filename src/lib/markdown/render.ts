@@ -38,31 +38,29 @@ hljs.registerLanguage("shell", bash);
 hljs.registerLanguage("markdown", markdown);
 hljs.registerLanguage("md", markdown);
 
-
 const md = new MarkdownIt({
-  html: false,
-  linkify: true,
-  typographer: true,
-  highlight(str, lang) {
-    if (lang) {
-      const language = lang.trim().toLowerCase();
-      if (hljs.getLanguage(language)) {
-        try {
-          return hljs.highlight(str, {
-            language,
-            ignoreIllegals: true,
-          }).value;
-        } catch {
-          // Fall through to MarkdownIt's normal code rendering.
+    html: false,
+    linkify: true,
+    typographer: true,
+    highlight(str, lang) {
+        if (lang) {
+            const language = lang.trim().toLowerCase();
+            if (hljs.getLanguage(language)) {
+                try {
+                    return hljs.highlight(str, {
+                        language,
+                        ignoreIllegals: true,
+                    }).value;
+                } catch {
+                    // Fall through to MarkdownIt's normal code rendering.
+                }
+            }
         }
-      }
-    }
-    // Returning an empty string tells markdown-it to use its
-    // normal escaped <code> output instead.
-    return "";
-  },
+        // Returning an empty string tells markdown-it to use its
+        // normal escaped <code> output instead.
+        return "";
+    },
 });
-
 
 /**
  * Render Markdown into sanitized HTML.
@@ -75,7 +73,7 @@ const md = new MarkdownIt({
  * must be sanitized before it is inserted into the DOM.
  */
 export function renderMarkdownToSafeHtml(source: string): string {
-  const rendered = md.render(source);
+    const rendered = md.render(source);
 
-  return DOMPurify.sanitize(rendered);
+    return DOMPurify.sanitize(rendered);
 }

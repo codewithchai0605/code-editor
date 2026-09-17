@@ -2,19 +2,19 @@ import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import {
-  openWorkspace,
-  readDir,
-  createEntry,
-  renameEntry,
-  deleteEntries,
-  copyPaths,
-  movePaths,
+    openWorkspace,
+    readDir,
+    createEntry,
+    renameEntry,
+    deleteEntries,
+    copyPaths,
+    movePaths,
 } from "$lib/api/fs";
 import { isFsError, type FsEntry } from "$lib/types/fs";
 import { baseName, parentOf } from "$lib/utils/path";
 import { gitStore } from "./git.svelte";
 import { toastStore } from "./toast.svelte";
-import { lspStore } from "$lib/lsp/manager.svelte"
+import { lspStore } from "$lib/lsp/manager.svelte";
 
 /**
  * Central state for the Explorer: which folder is open, which directories
@@ -29,285 +29,285 @@ import { lspStore } from "$lib/lsp/manager.svelte"
  */
 
 interface DirState {
-  children: FsEntry[];
-  loading: boolean;
+    children: FsEntry[];
+    loading: boolean;
 }
 
 type ClipboardMode = "copy" | "cut";
 
 interface PendingConflict {
-  sources: string[];
-  destDir: string;
-  mode: "copy" | "move";
-  conflictingPaths: string[];
+    sources: string[];
+    destDir: string;
+    mode: "copy" | "move";
+    conflictingPaths: string[];
 }
 
 function describeError(err: unknown): string {
-  if (isFsError(err)) {
-    return err.message ?? "Something went wrong.";
-  }
-  return err instanceof Error ? err.message : String(err);
+    if (isFsError(err)) {
+        return err.message ?? "Something went wrong.";
+    }
+    return err instanceof Error ? err.message : String(err);
 }
 
 class WorkspaceState {
-  rootPath = $state<string | null>(null);
-  rootName = $state<string>("");
+    rootPath = $state<string | null>(null);
+    rootName = $state<string>("");
 
-  private dirs = new SvelteMap<string, DirState>();
-  expanded = new SvelteSet<string>();
-  selected = new SvelteSet<string>();
-  focusedPath = $state<string | null>(null);
+    private dirs = new SvelteMap<string, DirState>();
+    expanded = new SvelteSet<string>();
+    selected = new SvelteSet<string>();
+    focusedPath = $state<string | null>(null);
 
-  clipboard = $state<{ paths: string[]; mode: ClipboardMode } | null>(null);
-  renamingPath = $state<string | null>(null);
-  creating = $state<{ parentDir: string; isDir: boolean } | null>(null);
-  pendingConflict = $state<PendingConflict | null>(null);
-  copyProgress = $state<{ done: number; total: number } | null>(null);
-  lastError = $state<string | null>(null);
-  private fsListenerStarted = false;
+    clipboard = $state<{ paths: string[]; mode: ClipboardMode } | null>(null);
+    renamingPath = $state<string | null>(null);
+    creating = $state<{ parentDir: string; isDir: boolean } | null>(null);
+    pendingConflict = $state<PendingConflict | null>(null);
+    copyProgress = $state<{ done: number; total: number } | null>(null);
+    lastError = $state<string | null>(null);
+    private fsListenerStarted = false;
 
-  /** Sets `lastError` (still read directly in a couple of places) and
-   *  surfaces the same message as a toast — a file operation the user
-   *  just triggered (rename, delete, copy/move) failing is exactly the
-   *  kind of thing worth a visible, if transient, notification. */
-  private reportError(err: unknown): void {
-    const message = describeError(err);
-    this.lastError = message;
-    toastStore.error(message);
-  }
-
-  childrenOf(path: string): FsEntry[] | undefined {
-    return this.dirs.get(path)?.children;
-  }
-
-  isLoading(path: string): boolean {
-    return this.dirs.get(path)?.loading ?? false;
-  }
-
-  /** Wires up the backend's `fs:changed` events (emitted by the workspace
-   *  file watcher started in fs.rs's `open_workspace`) to re-fetch whatever
-   *  directories they touch. The watcher itself has always been running —
-   *  nothing on this side was listening for its events, so an external
-   *  change (another program's checkout, `npm install`, a build script)
-   *  never showed up in the tree until the app was restarted. Call once,
-   *  e.g. from Shell.svelte's onMount. */
-  initFsWatcherListener(): void {
-    if (this.fsListenerStarted) return;
-    this.fsListenerStarted = true;
-    listen<string[]>("fs:changed", (event) => {
-      for (const dir of event.payload) this.refresh(dir);
-    });
-  }
-
-  // --- open / refresh ----------------------------------------------------
-
-  /** Shows the native folder picker and opens whatever the user chose.
-   *  Shared by FileTree's buttons and the Command Palette's "Open Folder"
-   *  command, so there's exactly one place that knows how to invoke the
-   *  dialog. */
-  async pickAndOpenFolder(): Promise<void> {
-    const selected = await openDialog({ directory: true, multiple: false });
-    if (typeof selected === "string") {
-      await this.open(selected);
+    /** Sets `lastError` (still read directly in a couple of places) and
+     *  surfaces the same message as a toast — a file operation the user
+     *  just triggered (rename, delete, copy/move) failing is exactly the
+     *  kind of thing worth a visible, if transient, notification. */
+    private reportError(err: unknown): void {
+        const message = describeError(err);
+        this.lastError = message;
+        toastStore.error(message);
     }
-  }
 
-  async open(path: string): Promise<void> {
-    try {
-      const entries = await openWorkspace(path);
-      this.dirs.clear();
-      this.dirs.set(path, { children: entries, loading: false });
-      this.expanded.clear();
-      this.expanded.add(path);
-      this.selected.clear();
-      this.rootPath = path;
-      this.rootName = baseName(path);
-      this.lastError = null;
-      // Not awaited — git status shouldn't block the tree from opening
-      // (a slow/huge repo's status walk is unrelated to whether the
-      // *files* are ready to show), and `setRoot` handles its own errors.
-      void gitStore.scanWorkspace(path);
-      // void lspStore.startForWorkspace(path);
-    } catch (err) {
-      this.reportError(err);
+    childrenOf(path: string): FsEntry[] | undefined {
+        return this.dirs.get(path)?.children;
     }
-  }
 
-  /** Re-fetches a directory's listing if it's currently loaded/expanded.
-   *  A no-op for directories nobody has expanded yet — the lazy tree stays
-   *  lazy even when the watcher reports changes deep in unopened folders. */
-  async refresh(path: string): Promise<void> {
-    if (!this.dirs.has(path)) return;
-    try {
-      const entries = await readDir(path);
-      this.dirs.set(path, { children: entries, loading: false });
-    } catch {
-      // Directory may have just been deleted — leave the last known
-      // listing rather than erroring loudly over a benign race.
+    isLoading(path: string): boolean {
+        return this.dirs.get(path)?.loading ?? false;
     }
-  }
 
-  async toggleExpand(entry: FsEntry): Promise<void> {
-    if (!entry.isDir) return;
-    if (this.expanded.has(entry.path)) {
-      this.expanded.delete(entry.path);
-      return;
+    /** Wires up the backend's `fs:changed` events (emitted by the workspace
+     *  file watcher started in fs.rs's `open_workspace`) to re-fetch whatever
+     *  directories they touch. The watcher itself has always been running —
+     *  nothing on this side was listening for its events, so an external
+     *  change (another program's checkout, `npm install`, a build script)
+     *  never showed up in the tree until the app was restarted. Call once,
+     *  e.g. from Shell.svelte's onMount. */
+    initFsWatcherListener(): void {
+        if (this.fsListenerStarted) return;
+        this.fsListenerStarted = true;
+        listen<string[]>("fs:changed", (event) => {
+            for (const dir of event.payload) this.refresh(dir);
+        });
     }
-    this.expanded.add(entry.path);
-    if (this.dirs.has(entry.path)) return;
-    this.dirs.set(entry.path, { children: [], loading: true });
-    try {
-      const entries = await readDir(entry.path);
-      this.dirs.set(entry.path, { children: entries, loading: false });
-    } catch (err) {
-      this.dirs.set(entry.path, { children: [], loading: false });
-      this.lastError = describeError(err);
+
+    // --- open / refresh ----------------------------------------------------
+
+    /** Shows the native folder picker and opens whatever the user chose.
+     *  Shared by FileTree's buttons and the Command Palette's "Open Folder"
+     *  command, so there's exactly one place that knows how to invoke the
+     *  dialog. */
+    async pickAndOpenFolder(): Promise<void> {
+        const selected = await openDialog({ directory: true, multiple: false });
+        if (typeof selected === "string") {
+            await this.open(selected);
+        }
     }
-  }
 
-  // --- selection -----------------------------------------------------------
-
-  select(path: string, opts: { toggle?: boolean } = {}): void {
-    if (opts.toggle) {
-      if (this.selected.has(path)) this.selected.delete(path);
-      else this.selected.add(path);
-    } else {
-      this.selected.clear();
-      this.selected.add(path);
+    async open(path: string): Promise<void> {
+        try {
+            const entries = await openWorkspace(path);
+            this.dirs.clear();
+            this.dirs.set(path, { children: entries, loading: false });
+            this.expanded.clear();
+            this.expanded.add(path);
+            this.selected.clear();
+            this.rootPath = path;
+            this.rootName = baseName(path);
+            this.lastError = null;
+            // Not awaited — git status shouldn't block the tree from opening
+            // (a slow/huge repo's status walk is unrelated to whether the
+            // *files* are ready to show), and `setRoot` handles its own errors.
+            void gitStore.scanWorkspace(path);
+            // void lspStore.startForWorkspace(path);
+        } catch (err) {
+            this.reportError(err);
+        }
     }
-    this.focusedPath = path;
-  }
 
-  // --- create / rename / delete -------------------------------------------
-
-  startCreate(parentDir: string, isDir: boolean): void {
-    this.expanded.add(parentDir);
-    this.creating = { parentDir, isDir };
-  }
-
-  cancelCreate(): void {
-    this.creating = null;
-  }
-
-  async confirmCreate(name: string): Promise<void> {
-    if (!this.creating) return;
-    const { parentDir } = this.creating;
-    try {
-      await createEntry(parentDir, name, this.creating.isDir);
-      this.creating = null;
-      await this.refresh(parentDir);
-    } catch (err) {
-      this.reportError(err);
+    /** Re-fetches a directory's listing if it's currently loaded/expanded.
+     *  A no-op for directories nobody has expanded yet — the lazy tree stays
+     *  lazy even when the watcher reports changes deep in unopened folders. */
+    async refresh(path: string): Promise<void> {
+        if (!this.dirs.has(path)) return;
+        try {
+            const entries = await readDir(path);
+            this.dirs.set(path, { children: entries, loading: false });
+        } catch {
+            // Directory may have just been deleted — leave the last known
+            // listing rather than erroring loudly over a benign race.
+        }
     }
-  }
 
-  startRename(path: string): void {
-    this.renamingPath = path;
-  }
-
-  cancelRename(): void {
-    this.renamingPath = null;
-  }
-
-  async confirmRename(path: string, newName: string): Promise<void> {
-    try {
-      await renameEntry(path, newName);
-      this.renamingPath = null;
-      await this.refresh(parentOf(path));
-    } catch (err) {
-      this.reportError(err);
+    async toggleExpand(entry: FsEntry): Promise<void> {
+        if (!entry.isDir) return;
+        if (this.expanded.has(entry.path)) {
+            this.expanded.delete(entry.path);
+            return;
+        }
+        this.expanded.add(entry.path);
+        if (this.dirs.has(entry.path)) return;
+        this.dirs.set(entry.path, { children: [], loading: true });
+        try {
+            const entries = await readDir(entry.path);
+            this.dirs.set(entry.path, { children: entries, loading: false });
+        } catch (err) {
+            this.dirs.set(entry.path, { children: [], loading: false });
+            this.lastError = describeError(err);
+        }
     }
-  }
 
-  async deleteSelected(): Promise<void> {
-    const paths = [...this.selected];
-    if (paths.length === 0) return;
-    const parents = new Set(paths.map(parentOf));
-    try {
-      await deleteEntries(paths);
-      this.selected.clear();
-      for (const parent of parents) await this.refresh(parent);
-    } catch (err) {
-      this.reportError(err);
+    // --- selection -----------------------------------------------------------
+
+    select(path: string, opts: { toggle?: boolean } = {}): void {
+        if (opts.toggle) {
+            if (this.selected.has(path)) this.selected.delete(path);
+            else this.selected.add(path);
+        } else {
+            this.selected.clear();
+            this.selected.add(path);
+        }
+        this.focusedPath = path;
     }
-  }
 
-  // --- clipboard / copy / move --------------------------------------------
+    // --- create / rename / delete -------------------------------------------
 
-  copySelection(): void {
-    if (this.selected.size === 0) return;
-    this.clipboard = { paths: [...this.selected], mode: "copy" };
-  }
-
-  cutSelection(): void {
-    if (this.selected.size === 0) return;
-    this.clipboard = { paths: [...this.selected], mode: "cut" };
-  }
-
-  async pasteInto(destDir: string): Promise<void> {
-    if (!this.clipboard) return;
-    const { paths, mode } = this.clipboard;
-    const ok = await this.transfer(paths, destDir, mode === "cut" ? "move" : "copy", false);
-    if (ok && mode === "cut") this.clipboard = null;
-  }
-
-  /** Called on an OS/in-tree drop of `sources` onto `destDir`. */
-  async dropInto(sources: string[], destDir: string): Promise<void> {
-    await this.transfer(sources, destDir, "move", false);
-  }
-
-  /** Files dragged in from outside the app (e.g. Windows Explorer) are
-   *  copied in rather than moved — deleting someone's original file just
-   *  because they dragged it into the editor would be a nasty surprise. */
-  async importPaths(sources: string[], destDir: string): Promise<void> {
-    await this.transfer(sources, destDir, "copy", false);
-  }
-
-  async resolveConflict(overwrite: boolean): Promise<void> {
-    const pending = this.pendingConflict;
-    this.pendingConflict = null;
-    if (!pending || !overwrite) return;
-    await this.transfer(pending.sources, pending.destDir, pending.mode, true);
-  }
-
-  /** Returns true on success (including "no-op because nothing to do"),
-   *  false if it stopped early on a conflict (a dialog is now pending). */
-  private async transfer(
-    sources: string[],
-    destDir: string,
-    mode: "copy" | "move",
-    overwrite: boolean,
-  ): Promise<boolean> {
-    // For a move, anything already directly inside destDir isn't actually
-    // going anywhere — including it would make the backend see a "conflict"
-    // against the item's own current location. (Copies are left as-is:
-    // copying into the same folder legitimately conflicts with the
-    // original and should prompt, same as any file manager.)
-    const actionable =
-      mode === "move" ? sources.filter((s) => parentOf(s) !== destDir) : sources;
-    if (actionable.length === 0) return true;
-
-    const affectedDirs = new Set(actionable.map(parentOf));
-    affectedDirs.add(destDir);
-    try {
-      if (mode === "copy") await copyPaths(actionable, destDir, overwrite);
-      else await movePaths(actionable, destDir, overwrite);
-      for (const dir of affectedDirs) await this.refresh(dir);
-      return true;
-    } catch (err) {
-      if (isFsError(err) && err.kind === "conflict") {
-        this.pendingConflict = {
-          sources: actionable,
-          destDir,
-          mode,
-          conflictingPaths: err.paths ?? [],
-        };
-        return false;
-      }
-      this.reportError(err);
-      return false;
+    startCreate(parentDir: string, isDir: boolean): void {
+        this.expanded.add(parentDir);
+        this.creating = { parentDir, isDir };
     }
-  }
+
+    cancelCreate(): void {
+        this.creating = null;
+    }
+
+    async confirmCreate(name: string): Promise<void> {
+        if (!this.creating) return;
+        const { parentDir } = this.creating;
+        try {
+            await createEntry(parentDir, name, this.creating.isDir);
+            this.creating = null;
+            await this.refresh(parentDir);
+        } catch (err) {
+            this.reportError(err);
+        }
+    }
+
+    startRename(path: string): void {
+        this.renamingPath = path;
+    }
+
+    cancelRename(): void {
+        this.renamingPath = null;
+    }
+
+    async confirmRename(path: string, newName: string): Promise<void> {
+        try {
+            await renameEntry(path, newName);
+            this.renamingPath = null;
+            await this.refresh(parentOf(path));
+        } catch (err) {
+            this.reportError(err);
+        }
+    }
+
+    async deleteSelected(): Promise<void> {
+        const paths = [...this.selected];
+        if (paths.length === 0) return;
+        const parents = new Set(paths.map(parentOf));
+        try {
+            await deleteEntries(paths);
+            this.selected.clear();
+            for (const parent of parents) await this.refresh(parent);
+        } catch (err) {
+            this.reportError(err);
+        }
+    }
+
+    // --- clipboard / copy / move --------------------------------------------
+
+    copySelection(): void {
+        if (this.selected.size === 0) return;
+        this.clipboard = { paths: [...this.selected], mode: "copy" };
+    }
+
+    cutSelection(): void {
+        if (this.selected.size === 0) return;
+        this.clipboard = { paths: [...this.selected], mode: "cut" };
+    }
+
+    async pasteInto(destDir: string): Promise<void> {
+        if (!this.clipboard) return;
+        const { paths, mode } = this.clipboard;
+        const ok = await this.transfer(paths, destDir, mode === "cut" ? "move" : "copy", false);
+        if (ok && mode === "cut") this.clipboard = null;
+    }
+
+    /** Called on an OS/in-tree drop of `sources` onto `destDir`. */
+    async dropInto(sources: string[], destDir: string): Promise<void> {
+        await this.transfer(sources, destDir, "move", false);
+    }
+
+    /** Files dragged in from outside the app (e.g. Windows Explorer) are
+     *  copied in rather than moved — deleting someone's original file just
+     *  because they dragged it into the editor would be a nasty surprise. */
+    async importPaths(sources: string[], destDir: string): Promise<void> {
+        await this.transfer(sources, destDir, "copy", false);
+    }
+
+    async resolveConflict(overwrite: boolean): Promise<void> {
+        const pending = this.pendingConflict;
+        this.pendingConflict = null;
+        if (!pending || !overwrite) return;
+        await this.transfer(pending.sources, pending.destDir, pending.mode, true);
+    }
+
+    /** Returns true on success (including "no-op because nothing to do"),
+     *  false if it stopped early on a conflict (a dialog is now pending). */
+    private async transfer(
+        sources: string[],
+        destDir: string,
+        mode: "copy" | "move",
+        overwrite: boolean,
+    ): Promise<boolean> {
+        // For a move, anything already directly inside destDir isn't actually
+        // going anywhere — including it would make the backend see a "conflict"
+        // against the item's own current location. (Copies are left as-is:
+        // copying into the same folder legitimately conflicts with the
+        // original and should prompt, same as any file manager.)
+        const actionable =
+            mode === "move" ? sources.filter((s) => parentOf(s) !== destDir) : sources;
+        if (actionable.length === 0) return true;
+
+        const affectedDirs = new Set(actionable.map(parentOf));
+        affectedDirs.add(destDir);
+        try {
+            if (mode === "copy") await copyPaths(actionable, destDir, overwrite);
+            else await movePaths(actionable, destDir, overwrite);
+            for (const dir of affectedDirs) await this.refresh(dir);
+            return true;
+        } catch (err) {
+            if (isFsError(err) && err.kind === "conflict") {
+                this.pendingConflict = {
+                    sources: actionable,
+                    destDir,
+                    mode,
+                    conflictingPaths: err.paths ?? [],
+                };
+                return false;
+            }
+            this.reportError(err);
+            return false;
+        }
+    }
 }
 
 export const workspace = new WorkspaceState();

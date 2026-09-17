@@ -3,11 +3,11 @@
  *  and it's the same convention VS Code's own "open the last preview
  *  state" default roughly matches for a single active editor. */
 class MarkdownPreviewStore {
-  open = $state(false);
+    open = $state(false);
 
-  toggle(): void {
-    this.open = !this.open;
-  }
+    toggle(): void {
+        this.open = !this.open;
+    }
 }
 
 export const markdownPreviewStore = new MarkdownPreviewStore();

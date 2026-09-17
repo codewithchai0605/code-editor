@@ -1,7 +1,13 @@
 import { listen } from "@tauri-apps/api/event";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { workspaceSearch, stopWorkspaceSearch, workspaceReplaceAll } from "$lib/api/search";
-import { isSearchError, type SearchDoneEvent, type SearchMatch, type SearchOptions, type SearchResultBatch } from "$lib/types/search";
+import {
+    isSearchError,
+    type SearchDoneEvent,
+    type SearchMatch,
+    type SearchOptions,
+    type SearchResultBatch,
+} from "$lib/types/search";
 import { workspace } from "./workspace.svelte";
 import { editorStore } from "./editor.svelte";
 
@@ -15,7 +21,9 @@ const DEBOUNCE_MS = 180;
 function describeError(err: unknown): string {
     if (isSearchError(err)) {
         if (err.message) return err.message;
-        return err.kind === "invalidRegex" ? "Invalid regular expression." : "Invalid glob pattern.";
+        return err.kind === "invalidRegex"
+            ? "Invalid regular expression."
+            : "Invalid glob pattern.";
     }
     return err instanceof Error ? err.message : String(err);
 }

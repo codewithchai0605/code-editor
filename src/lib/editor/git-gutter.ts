@@ -1,10 +1,4 @@
-import {
-    EditorSelection,
-    StateEffect,
-    StateField,
-    Text,
-    type Extension,
-} from "@codemirror/state";
+import { EditorSelection, StateEffect, StateField, Text, type Extension } from "@codemirror/state";
 import { EditorView, gutter, GutterMarker } from "@codemirror/view";
 import { Chunk } from "@codemirror/merge";
 import { gitStore } from "$lib/stores/git.svelte";
@@ -56,7 +50,13 @@ const gitGutterField = StateField.define<GitGutterState>({
         if (!baselineChanged && tr.docChanged && next.baseline) {
             next = {
                 baseline: next.baseline,
-                chunks: Chunk.updateB(next.chunks, next.baseline, tr.state.doc, tr.changes, DIFF_CONFIG),
+                chunks: Chunk.updateB(
+                    next.chunks,
+                    next.baseline,
+                    tr.state.doc,
+                    tr.changes,
+                    DIFF_CONFIG,
+                ),
             };
         }
         return next;
@@ -82,7 +82,9 @@ class ChangeMarker extends GutterMarker {
     }
     eq(other: GutterMarker): boolean {
         return (
-            other instanceof ChangeMarker && other.kind === this.kind && other.atDocEnd === this.atDocEnd
+            other instanceof ChangeMarker &&
+            other.kind === this.kind &&
+            other.atDocEnd === this.atDocEnd
         );
     }
     toDOM(): HTMLElement {
@@ -93,8 +95,8 @@ class ChangeMarker extends GutterMarker {
             this.kind === "added"
                 ? "Added line"
                 : this.kind === "modified"
-                    ? "Modified line"
-                    : "Line(s) removed here";
+                  ? "Modified line"
+                  : "Line(s) removed here";
         return el;
     }
 }
@@ -152,7 +154,10 @@ const changeGutter = gutter({
         return markerForLine(field.chunks, line.from, line.to, view.state.doc.length);
     },
     lineMarkerChange(update) {
-        return update.state.field(gitGutterField, false) !== update.startState.field(gitGutterField, false);
+        return (
+            update.state.field(gitGutterField, false) !==
+            update.startState.field(gitGutterField, false)
+        );
     },
     domEventHandlers: {
         mousedown(view) {
@@ -239,12 +244,7 @@ const gitGutterTheme = EditorView.baseTheme({
  *  always present and simply renders nothing until a baseline effect
  *  actually arrives. */
 export function gitGutter(filePath: string): Extension[] {
-    return [
-        gitGutterField,
-        gitGutterPath.init(() => filePath),
-        changeGutter,
-        gitGutterTheme,
-    ];
+    return [gitGutterField, gitGutterPath.init(() => filePath), changeGutter, gitGutterTheme];
 }
 
 /** Moves the cursor to the start of the next changed chunk (wrapping back

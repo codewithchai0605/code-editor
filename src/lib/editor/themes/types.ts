@@ -13,44 +13,44 @@
  * hand-maintained theme systems.
  */
 export interface ThemeColors {
-  // --- App shell -----------------------------------------------------
-  bg: string;
-  bgElevated: string;
-  bgSidebar: string;
-  bgActivitybar: string;
-  bgStatusbar: string;
-  statusbarText: string;
-  bgHover: string;
-  border: string;
-  text: string;
-  textMuted: string;
-  textFaint: string;
-  accent: string;
-  focusRing: string;
+    // --- App shell -----------------------------------------------------
+    bg: string;
+    bgElevated: string;
+    bgSidebar: string;
+    bgActivitybar: string;
+    bgStatusbar: string;
+    statusbarText: string;
+    bgHover: string;
+    border: string;
+    text: string;
+    textMuted: string;
+    textFaint: string;
+    accent: string;
+    focusRing: string;
 
-  // --- Editor-only chrome (not shared with the app shell) -------------
-  selection: string;
-  activeLine: string;
+    // --- Editor-only chrome (not shared with the app shell) -------------
+    selection: string;
+    activeLine: string;
 
-  // --- Syntax highlighting --------------------------------------------
-  comment: string;
-  keyword: string;
-  controlKeyword: string;
-  variable: string;
-  function: string;
-  type: string;
-  number: string;
-  string: string;
-  regexp: string;
-  operator: string;
-  tag: string;
-  attribute: string;
-  invalid: string;
+    // --- Syntax highlighting --------------------------------------------
+    comment: string;
+    keyword: string;
+    controlKeyword: string;
+    variable: string;
+    function: string;
+    type: string;
+    number: string;
+    string: string;
+    regexp: string;
+    operator: string;
+    tag: string;
+    attribute: string;
+    invalid: string;
 }
 
 export interface Theme {
-  id: string;
-  name: string;
-  dark: boolean;
-  colors: ThemeColors;
+    id: string;
+    name: string;
+    dark: boolean;
+    colors: ThemeColors;
 }

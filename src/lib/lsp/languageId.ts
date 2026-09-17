@@ -9,16 +9,16 @@ import { extensionOf } from "$lib/utils/fileIcons";
  * `src-tauri/src/lsp/registry.rs` when adding a new language.
  */
 const LANGUAGE_IDS: Record<string, string> = {
-  ts: "typescript",
-  tsx: "typescript",
-  js: "typescript",
-  jsx: "typescript",
-  mjs: "typescript",
-  cjs: "typescript",
-  py: "python",
-  rs: "rust",
+    ts: "typescript",
+    tsx: "typescript",
+    js: "typescript",
+    jsx: "typescript",
+    mjs: "typescript",
+    cjs: "typescript",
+    py: "python",
+    rs: "rust",
 };
 
 export function lspLanguageIdFor(fileName: string): string | null {
-  return LANGUAGE_IDS[extensionOf(fileName)] ?? null;
+    return LANGUAGE_IDS[extensionOf(fileName)] ?? null;
 }

@@ -118,11 +118,7 @@ function buildGuideStyle(levels: number, guideStepPx: number): string {
     ].join(";");
 }
 
-function getGuideStyle(
-    levels: number,
-    guideStepPx: number,
-    styleCache: GuideStyleCache,
-): string {
+function getGuideStyle(levels: number, guideStepPx: number, styleCache: GuideStyleCache): string {
     const key = `${levels}:${guideStepPx}`;
     let style = styleCache.get(key);
     if (!style) {
@@ -176,10 +172,7 @@ function buildDecorations(
         const firstLineNumber = startLine.number;
         const lastLineNumber = endLine.number;
         const scanStartLine = Math.max(1, firstLineNumber - BLANK_LINE_SCAN_LIMIT);
-        const scanEndLine = Math.min(
-            state.doc.lines,
-            lastLineNumber + BLANK_LINE_SCAN_LIMIT,
-        );
+        const scanEndLine = Math.min(state.doc.lines, lastLineNumber + BLANK_LINE_SCAN_LIMIT);
         const prevIndentByLine = new Map<number, number>();
         const nextIndentByLine = new Map<number, number>();
         let prevIndent = -1;
@@ -237,10 +230,7 @@ function buildDecorations(
                 }
             }
 
-            const levels = Math.min(
-                Math.floor(indentColumns / indentUnit),
-                MAX_GUIDE_LEVELS,
-            );
+            const levels = Math.min(Math.floor(indentColumns / indentUnit), MAX_GUIDE_LEVELS);
             if (levels <= 0) continue;
 
             if (info.blank) {
@@ -276,9 +266,7 @@ function buildDecorations(
 /**
  * ViewPlugin for indent guides
  */
-function createIndentGuidesPlugin(
-    config: Required<IndentGuidesConfig>,
-): ViewPlugin<{
+function createIndentGuidesPlugin(config: Required<IndentGuidesConfig>): ViewPlugin<{
     decorations: DecorationSet;
     update(update: ViewUpdate): void;
 }> {
@@ -297,12 +285,7 @@ function createIndentGuidesPlugin(
                 this.lastTabSize = getTabSize(state);
                 this.lastIndentUnit = getIndentUnitColumns(state);
 
-                this.decorations = buildDecorations(
-                    view,
-                    config,
-                    this.lineCache,
-                    this.styleCache,
-                );
+                this.decorations = buildDecorations(view, config, this.lineCache, this.styleCache);
             }
 
             update(update: ViewUpdate): void {

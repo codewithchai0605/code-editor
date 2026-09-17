@@ -25,10 +25,10 @@ rather than by eye:
 
 - **Rust**: a mock crate standing in for `tauri` (same call patterns your
   existing Step 1 code already used — `app.emit`, `app.try_state`,
-  `tauri::async_runtime::spawn`), compiled against the *real* `lsp-types`,
+  `tauri::async_runtime::spawn`), compiled against the _real_ `lsp-types`,
   `tokio`, and `ignore` crates. Caught two real bugs before you'd have hit
   them: a borrow-checker issue in `get_logs`, and — more importantly —
-  `project_scanner.rs` silently detecting *zero* project roots for the
+  `project_scanner.rs` silently detecting _zero_ project roots for the
   single-root case (opening a folder that directly contains `Cargo.toml`),
   because `ignore::WalkBuilder`'s `filter_entry` is never invoked for the
   walk's own root. Both fixed; 13 Rust unit tests pass, plus an end-to-end
@@ -88,7 +88,7 @@ Practically:
 - Workspace-root detection stops descending once a directory matches (see
   `project_scanner.rs`'s doc comment) — a monorepo's own nested packages
   are still found (each gets checked independently on the way down before
-  the "stop" rule kicks in for *their* subfolders), but this doesn't
+  the "stop" rule kicks in for _their_ subfolders), but this doesn't
   special-case e.g. a `package.json` `workspaces` field.
 
 ## Everything registered

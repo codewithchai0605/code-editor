@@ -12,7 +12,7 @@
  * that literal string instead sidesteps the problem entirely.
  */
 export function resolveCssVar(name: string, fallback = ""): string {
-  if (typeof document === "undefined") return fallback;
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return value || fallback;
+    if (typeof document === "undefined") return fallback;
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
 }

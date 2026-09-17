@@ -1,4 +1,5 @@
 # Lightweight Code Editor — Implementation Plan
+
 ### Tauri + Rust + CodeMirror 6, native-plugin extension system, Windows-first
 
 Based on your answers: **native Rust plugins (cdylib/dlopen)** for extensions, **Windows-first**, and a **generic user-configured LSP client**. This plan is built around those three decisions.
@@ -7,19 +8,19 @@ Based on your answers: **native Rust plugins (cdylib/dlopen)** for extensions, *
 
 ## 1. Tech Stack
 
-| Layer | Choice | Why |
-|---|---|---|
-| Shell | Tauri v2 | Uses OS WebView (WebView2 on Windows) — no bundled Chromium, ~100–150MB baseline vs Electron's 300–500MB |
-| Backend | Rust (tokio async runtime) | Required for Tauri; async for fs, PTY, LSP process I/O |
-| Frontend framework | Svelte (or SolidJS) | Compiles away, no virtual-DOM overhead — fits the "lightweight" goal better than React |
-| Editor | CodeMirror 6 | Modular/tree-shakeable, no web-worker-heavy Monaco runtime, good large-file/virtualized rendering |
-| Terminal renderer | xterm.js | Standard, not Monaco, pairs with a Rust PTY backend |
-| PTY backend | `portable-pty` (wezterm) | Wraps Windows ConPTY properly; swap-in ready for macOS/Linux later |
-| File watching | `notify` | Cross-platform fs events, needed for tree refresh + Quick Open index invalidation |
-| Fuzzy matching | `nucleo-matcher` (Helix's matcher) | Fast Rust-side fuzzy search for Quick Open / Command Palette, keeps large-repo indexing off the JS thread |
-| Native plugin loading | `libloading` + `abi_stable` | See §6 — this pairing is what makes native dlopen plugins survive across compiler versions |
-| Safe delete | `trash` crate | Recycle-bin-safe deletes instead of permanent `fs::remove` |
-| Git (phase 2+) | `git2` | Status badges in the tree, optional |
+| Layer                 | Choice                             | Why                                                                                                       |
+| --------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Shell                 | Tauri v2                           | Uses OS WebView (WebView2 on Windows) — no bundled Chromium, ~100–150MB baseline vs Electron's 300–500MB  |
+| Backend               | Rust (tokio async runtime)         | Required for Tauri; async for fs, PTY, LSP process I/O                                                    |
+| Frontend framework    | Svelte (or SolidJS)                | Compiles away, no virtual-DOM overhead — fits the "lightweight" goal better than React                    |
+| Editor                | CodeMirror 6                       | Modular/tree-shakeable, no web-worker-heavy Monaco runtime, good large-file/virtualized rendering         |
+| Terminal renderer     | xterm.js                           | Standard, not Monaco, pairs with a Rust PTY backend                                                       |
+| PTY backend           | `portable-pty` (wezterm)           | Wraps Windows ConPTY properly; swap-in ready for macOS/Linux later                                        |
+| File watching         | `notify`                           | Cross-platform fs events, needed for tree refresh + Quick Open index invalidation                         |
+| Fuzzy matching        | `nucleo-matcher` (Helix's matcher) | Fast Rust-side fuzzy search for Quick Open / Command Palette, keeps large-repo indexing off the JS thread |
+| Native plugin loading | `libloading` + `abi_stable`        | See §6 — this pairing is what makes native dlopen plugins survive across compiler versions                |
+| Safe delete           | `trash` crate                      | Recycle-bin-safe deletes instead of permanent `fs::remove`                                                |
+| Git (phase 2+)        | `git2`                             | Status badges in the tree, optional                                                                       |
 
 ---
 
@@ -55,8 +56,8 @@ Based on your answers: **native Rust plugins (cdylib/dlopen)** for extensions, *
 - **Live updates**: `notify` watcher on the open workspace root(s), debounced (~150ms) and diffed before emitting `tree:changed` events, so a `git checkout` doesn't spam the frontend.
 - **Clipboard model**: an explicit `ClipboardState { paths: Vec<PathBuf>, mode: Copy | Cut }` held in Rust state. Paste triggers `fs_copy` or `fs_move`; Cut visually dims the source item until paste/cancel (like VS Code).
 - **Drag & drop**: two paths —
-  - *In-tree* (reorder/move): HTML5 drag events in the tree view, drop handler calls `move_path` command.
-  - *OS → app* (dragging files from Explorer into the window): Tauri's `onDragDropEvent`, resolved to absolute paths, then either "open" (if dropped on editor area) or "copy into folder" (if dropped on tree node).
+    - _In-tree_ (reorder/move): HTML5 drag events in the tree view, drop handler calls `move_path` command.
+    - _OS → app_ (dragging files from Explorer into the window): Tauri's `onDragDropEvent`, resolved to absolute paths, then either "open" (if dropped on editor area) or "copy into folder" (if dropped on tree node).
 - **Conflict handling**: copy/move commands return a `Conflict` variant when destination exists; frontend shows overwrite/skip/rename-keep-both dialog rather than the backend silently deciding.
 - **Large copies**: stream + emit `progress` events (`bytes_done/total`) so big folder copies don't block or hang the UI.
 
@@ -87,13 +88,13 @@ Registering this as a small **viewer registry** (`registerViewer(matcher, factor
 Since it's stdio-based and the frontend can't spawn processes, Rust brokers everything:
 
 1. `settings.json` maps language IDs to server launch config, e.g.:
-   ```jsonc
-   "lsp.servers": {
-     "rust": { "command": "rust-analyzer", "args": [] },
-     "python": { "command": "pyright-langserver", "args": ["--stdio"] },
-     "typescript": { "command": "typescript-language-server", "args": ["--stdio"] }
-   }
-   ```
+    ```jsonc
+    "lsp.servers": {
+      "rust": { "command": "rust-analyzer", "args": [] },
+      "python": { "command": "pyright-langserver", "args": ["--stdio"] },
+      "typescript": { "command": "typescript-language-server", "args": ["--stdio"] }
+    }
+    ```
 2. On first file of a given language opening, Rust spawns the configured server (idle-timeout shutdown if unused — keeps memory down), pipes stdin/stdout as JSON-RPC.
 3. Rust re-emits inbound LSP messages as Tauri events (`lsp:message:<server_id>`) and accepts outbound ones via an `invoke('lsp_send', ...)` command.
 4. On the frontend, write a thin custom `Transport` for `codemirror-languageserver` (or wire `@codemirror/lint` / `@codemirror/autocomplete` manually) that implements `send`/`subscribe` over `invoke`/`listen` instead of the WebSocket transport those libraries assume by default. This is the one non-trivial integration piece — budget real time for it.
@@ -108,7 +109,7 @@ Since it's stdio-based and the frontend can't spawn processes, Rust brokers ever
 
 ## 8. Extension System — Native Rust Plugins (cdylib/dlopen)
 
-You picked the fastest/lightest option — worth being upfront about its real tradeoff before the design: **plain Rust has no stable ABI across compiler versions/editions**, so a naive `dlopen` + raw trait object *will* segfault if a plugin is built with a different rustc than the host. Two ways to make this safe enough to ship:
+You picked the fastest/lightest option — worth being upfront about its real tradeoff before the design: **plain Rust has no stable ABI across compiler versions/editions**, so a naive `dlopen` + raw trait object _will_ segfault if a plugin is built with a different rustc than the host. Two ways to make this safe enough to ship:
 
 - **Recommended**: use the **`abi_stable`** crate. It gives you `#[repr(C)]`-safe, versioned trait objects and vtables specifically so native plugins can be loaded across compiler versions without matching the host's exact toolchain.
 - **Leaner alternative**: hand-roll a minimal C ABI — `extern "C"` entry point returning a `#[repr(C)]` struct of raw function pointers — more boilerplate, zero extra dependency.
@@ -116,6 +117,7 @@ You picked the fastest/lightest option — worth being upfront about its real tr
 Either way, the host must **version-check before trusting the pointer** (a magic number + ABI version in the plugin's exported struct), and a bad extension **can crash the whole process** since it runs in-process with full privileges — there's no sandbox here by design, given the "fastest/lightest" choice. Worth documenting clearly for anyone installing third-party extensions later; an out-of-process (IPC-based) plugin host is the natural escape hatch if a marketplace with untrusted authors becomes a goal.
 
 **Plugin lifecycle**
+
 1. Extensions live in an `extensions/` folder, each a folder with `extension.toml` (id, name, version, entry `.dll` path, `contributes: { commands, viewers, languages, statusBarItems }`) and the compiled `.dll`.
 2. On startup, host scans the folder, `libloading::Library::new()`s each `.dll`, looks up a well-known symbol (e.g. `_plugin_entry`), version-checks, then calls `init(host_api: &HostApi)`.
 3. `HostApi` (v1) exposes: `register_command`, `contribute_status_bar_item`, `subscribe(event)` (file opened/saved, workspace changed), `read_file`/`write_file`, `show_notification`.
@@ -135,19 +137,19 @@ Either way, the host must **version-check before trusting the pointer** (a magic
 
 ## 10. Phased Roadmap
 
-| Phase | Deliverable |
-|---|---|
-| 0 | Tauri v2 + Svelte scaffold, window chrome, build pipeline for Windows |
-| 1 | Shell layout: activity bar, sidebar, tab bar, status bar, panel region |
-| 2 | Filesystem module + file tree (lazy load, watcher) + copy/cut/paste/move/drag-drop + safe delete |
-| 3 | EditorFile abstraction, CodeMirror integration, multi-tab, Image/Audio/Binary viewers |
-| 4 | Quick Open (Ctrl+P) + Command Palette + keybinding system + command registry |
-| 5 | Integrated terminal (portable-pty + xterm.js, multi-session) |
-| 6 | Generic LSP client: settings.json config, stdio↔IPC bridge, custom Transport, diagnostics/hover/completion/go-to-def |
-| 7 | Native plugin host: `abi_stable` vtable, `libloading` loader, extension.toml manifest, Host API v1, example extension + `cargo generate` template |
-| 8 | Settings system (settings.json + settings UI), themes, custom keybindings |
-| 9 | Perf/memory pass, Windows installer (MSI/NSIS via Tauri bundler), crash reporting opt-in |
-| 10+ (stretch) | macOS/Linux port, git status in tree, DAP debugging, extension marketplace/registry, out-of-process plugin sandbox |
+| Phase         | Deliverable                                                                                                                                       |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0             | Tauri v2 + Svelte scaffold, window chrome, build pipeline for Windows                                                                             |
+| 1             | Shell layout: activity bar, sidebar, tab bar, status bar, panel region                                                                            |
+| 2             | Filesystem module + file tree (lazy load, watcher) + copy/cut/paste/move/drag-drop + safe delete                                                  |
+| 3             | EditorFile abstraction, CodeMirror integration, multi-tab, Image/Audio/Binary viewers                                                             |
+| 4             | Quick Open (Ctrl+P) + Command Palette + keybinding system + command registry                                                                      |
+| 5             | Integrated terminal (portable-pty + xterm.js, multi-session)                                                                                      |
+| 6             | Generic LSP client: settings.json config, stdio↔IPC bridge, custom Transport, diagnostics/hover/completion/go-to-def                              |
+| 7             | Native plugin host: `abi_stable` vtable, `libloading` loader, extension.toml manifest, Host API v1, example extension + `cargo generate` template |
+| 8             | Settings system (settings.json + settings UI), themes, custom keybindings                                                                         |
+| 9             | Perf/memory pass, Windows installer (MSI/NSIS via Tauri bundler), crash reporting opt-in                                                          |
+| 10+ (stretch) | macOS/Linux port, git status in tree, DAP debugging, extension marketplace/registry, out-of-process plugin sandbox                                |
 
 ---
 

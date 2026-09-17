@@ -8,29 +8,29 @@
  * `node_modules/emmet/dist/*.d.ts` — see the note in emmet.ts.
  */
 declare module "emmet" {
-  export interface EmmetUserConfig {
-    syntax?: string;
-    [key: string]: unknown;
-  }
+    export interface EmmetUserConfig {
+        syntax?: string;
+        [key: string]: unknown;
+    }
 
-  export interface ExtractedAbbreviation {
-    abbreviation: string;
-    location: number;
-    start: number;
-    end: number;
-  }
+    export interface ExtractedAbbreviation {
+        abbreviation: string;
+        location: number;
+        start: number;
+        end: number;
+    }
 
-  export interface ExtractOptions {
-    lookAhead: boolean;
-    type: "markup" | "stylesheet";
-    prefix: string;
-  }
+    export interface ExtractOptions {
+        lookAhead: boolean;
+        type: "markup" | "stylesheet";
+        prefix: string;
+    }
 
-  export function extract(
-    line: string,
-    pos?: number,
-    options?: Partial<ExtractOptions>,
-  ): ExtractedAbbreviation | undefined;
+    export function extract(
+        line: string,
+        pos?: number,
+        options?: Partial<ExtractOptions>,
+    ): ExtractedAbbreviation | undefined;
 
-  export default function expandAbbreviation(abbr: string, config?: EmmetUserConfig): string;
+    export default function expandAbbreviation(abbr: string, config?: EmmetUserConfig): string;
 }

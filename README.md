@@ -53,7 +53,7 @@ scripts/
 
 - **Responsiveness**: the shell is flexbox-based, not fixed pixel layout. The sidebar and
   panel are user-resizable via drag handles, but their widths/heights are continuously
-  clamped against the *current* window size (see `layout.svelte.ts`), and the sidebar
+  clamped against the _current_ window size (see `layout.svelte.ts`), and the sidebar
   auto-collapses below a width breakpoint. The window itself has a `minWidth`/`minHeight`
   floor set in `tauri.conf.json` so the layout never has to render in an impossible space.
 - **Theming**: one dark theme for now, entirely driven by CSS custom properties in

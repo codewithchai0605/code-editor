@@ -1,0 +1,8 @@
+node_modules
+.bun
+build
+.vite
+src-tauri/target
+coverage
+**/*.min.js
+**/*.svg

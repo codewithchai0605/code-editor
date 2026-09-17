@@ -1,5 +1,10 @@
 import { EditorState, type Extension } from "@codemirror/state";
-import type { Completion, CompletionContext, CompletionResult, CompletionSource } from "@codemirror/autocomplete";
+import type {
+    Completion,
+    CompletionContext,
+    CompletionResult,
+    CompletionSource,
+} from "@codemirror/autocomplete";
 import { lspCompletion } from "$lib/api/lsp";
 import { lspStore } from "./manager.svelte";
 import { workspace } from "$lib/stores/workspace.svelte";
@@ -54,7 +59,9 @@ interface LspCompletionItem {
     filterText?: string;
     insertText?: string;
     insertTextFormat?: number; // 1 = PlainText, 2 = Snippet
-    textEdit?: { range: { start: unknown; end: unknown }; newText: string } | { insert: { start: unknown; end: unknown }; newText: string };
+    textEdit?:
+        | { range: { start: unknown; end: unknown }; newText: string }
+        | { insert: { start: unknown; end: unknown }; newText: string };
 }
 
 /** Strips the common LSP snippet placeholder shapes (`$0`, `$1`,
@@ -126,7 +133,9 @@ function buildSource(filePath: string): CompletionSource {
         }
         if (context.aborted || !result) return null;
 
-        const items: LspCompletionItem[] = Array.isArray(result) ? result : ((result as { items?: LspCompletionItem[] }).items ?? []);
+        const items: LspCompletionItem[] = Array.isArray(result)
+            ? result
+            : ((result as { items?: LspCompletionItem[] }).items ?? []);
         if (items.length === 0) return null;
 
         return {

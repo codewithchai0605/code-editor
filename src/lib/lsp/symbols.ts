@@ -19,7 +19,11 @@ function isSymbolInformationArray(result: unknown): result is LspSymbolInformati
     return Array.isArray(result) && result.length > 0 && "location" in (result[0] as object);
 }
 
-function flattenDocumentSymbols(symbols: LspDocumentSymbol[], path: string, containerName?: string): SymbolEntry[] {
+function flattenDocumentSymbols(
+    symbols: LspDocumentSymbol[],
+    path: string,
+    containerName?: string,
+): SymbolEntry[] {
     const out: SymbolEntry[] = [];
     for (const symbol of symbols) {
         out.push({
@@ -30,7 +34,8 @@ function flattenDocumentSymbols(symbols: LspDocumentSymbol[], path: string, cont
             range: symbol.selectionRange ?? symbol.range,
             containerName,
         });
-        if (symbol.children?.length) out.push(...flattenDocumentSymbols(symbol.children, path, symbol.name));
+        if (symbol.children?.length)
+            out.push(...flattenDocumentSymbols(symbol.children, path, symbol.name));
     }
     return out;
 }
@@ -67,7 +72,9 @@ export async function fetchDocumentSymbols(): Promise<SymbolEntry[]> {
     }
     if (!Array.isArray(result) || result.length === 0) return [];
 
-    return isSymbolInformationArray(result) ? fromSymbolInformation(result) : flattenDocumentSymbols(result as LspDocumentSymbol[], tab.path);
+    return isSymbolInformationArray(result)
+        ? fromSymbolInformation(result)
+        : flattenDocumentSymbols(result as LspDocumentSymbol[], tab.path);
 }
 
 /** For "Go to Symbol in Workspace" (Ctrl+T) — fans out to every running

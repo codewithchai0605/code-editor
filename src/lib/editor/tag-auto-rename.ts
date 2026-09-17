@@ -48,11 +48,7 @@ function readNode(doc: Text, node: SyntaxNode): string {
     return doc.sliceString(node.from, node.to);
 }
 
-function getRenameTarget(
-    state: EditorState,
-    from: number,
-    to: number,
-): RenameTarget | null {
+function getRenameTarget(state: EditorState, from: number, to: number): RenameTarget | null {
     const tagName = getTagNameNode(state, from, to);
     const tag = tagName?.parent;
     const element = tag?.parent;
@@ -122,33 +118,16 @@ function createPairedRename(transaction: Transaction): ChangeSpec | null {
     if (ranges.length !== 1) return null;
 
     const [change] = ranges;
-    const target = getRenameTarget(
-        transaction.startState,
-        change.fromA,
-        change.toA,
-    );
+    const target = getRenameTarget(transaction.startState, change.fromA, change.toA);
     if (!target || !touchesRange(change, target.tagName.from, target.tagName.to)) {
         return null;
     }
-    if (
-        touchesRange(
-            change,
-            target.pairedTagName.from,
-            target.pairedTagName.to,
-        )
-    ) {
+    if (touchesRange(change, target.pairedTagName.from, target.pairedTagName.to)) {
         return null;
     }
 
-    const editedRange = mapEditedRange(
-        transaction,
-        target.tagName.from,
-        target.tagName.to,
-    );
-    const newName = transaction.newDoc.sliceString(
-        editedRange.from,
-        editedRange.to,
-    );
+    const editedRange = mapEditedRange(transaction, target.tagName.from, target.tagName.to);
+    const newName = transaction.newDoc.sliceString(editedRange.from, editedRange.to);
     if (newName && !tagNamePattern.test(newName)) return null;
 
     return {

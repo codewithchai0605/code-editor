@@ -3,28 +3,20 @@ import { readFileSync, writeFileSync, statSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const files = [
-    "./src/",                 // folder
-    "./src-tauri/src",        // folder
-    "./scripts",              // folder
+    "./src/", // folder
+    "./src-tauri/src", // folder
+    "./scripts", // folder
     "./src-tauri/Cargo.toml", // file
-    "./package.json",         // file
-    "./README.md",            // file
-    "./vite.config.js",       // file
-    "./svelte.config.js",     // file
-    "./tsconfig.json",        // file
-    "./CLAUDE.md",        // file
+    "./package.json", // file
+    "./README.md", // file
+    "./vite.config.js", // file
+    "./svelte.config.js", // file
+    "./tsconfig.json", // file
+    "./CLAUDE.md", // file
 ];
 
 const zip = new JSZip();
-const IGNORE = new Set([
-    "node_modules",
-    ".git",
-    "target",
-    "dist",
-    "build",
-    ".svelte-kit",
-    "icons"
-]);
+const IGNORE = new Set(["node_modules", ".git", "target", "dist", "build", ".svelte-kit", "icons"]);
 
 function addPath(path, baseDir = "..") {
     const stat = statSync(path);

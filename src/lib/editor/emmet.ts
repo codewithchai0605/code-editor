@@ -9,15 +9,15 @@ import type { Command } from "@codemirror/view";
  *  grammars applies (markup vs. stylesheet — they parse differently, e.g.
  *  stylesheet syntax doesn't support markup's `[]`/`{}` attribute syntax). */
 const MARKUP_SYNTAX: Record<string, string> = {
-  html: "html",
-  htm: "html",
-  xml: "xml",
-  svg: "html",
-  jsx: "jsx",
-  tsx: "jsx",
+    html: "html",
+    htm: "html",
+    xml: "xml",
+    svg: "html",
+    jsx: "jsx",
+    tsx: "jsx",
 };
 const STYLESHEET_SYNTAX: Record<string, string> = {
-  css: "css",
+    css: "css",
 };
 
 /** Builds a Tab-triggered Emmet-expand command for the given file
@@ -25,41 +25,41 @@ const STYLESHEET_SYNTAX: Record<string, string> = {
  *  fall through to normal Tab handling (indent) in that case rather than
  *  binding a command with nothing to do. */
 export function emmetExpandCommand(extension: string): Command | null {
-  const markupSyntax = MARKUP_SYNTAX[extension];
-  const stylesheetSyntax = STYLESHEET_SYNTAX[extension];
-  if (!markupSyntax && !stylesheetSyntax) return null;
+    const markupSyntax = MARKUP_SYNTAX[extension];
+    const stylesheetSyntax = STYLESHEET_SYNTAX[extension];
+    if (!markupSyntax && !stylesheetSyntax) return null;
 
-  const syntax = markupSyntax ?? stylesheetSyntax;
-  const type: "markup" | "stylesheet" = markupSyntax ? "markup" : "stylesheet";
+    const syntax = markupSyntax ?? stylesheetSyntax;
+    const type: "markup" | "stylesheet" = markupSyntax ? "markup" : "stylesheet";
 
-  return (view) => {
-    const { from, to } = view.state.selection.main;
-    if (from !== to) return false; // let Tab handle an active selection normally (indent-more)
+    return (view) => {
+        const { from, to } = view.state.selection.main;
+        if (from !== to) return false; // let Tab handle an active selection normally (indent-more)
 
-    const line = view.state.doc.lineAt(from);
-    const posInLine = from - line.from;
+        const line = view.state.doc.lineAt(from);
+        const posInLine = from - line.from;
 
-    // `extract` finds the abbreviation immediately before the cursor —
-    // e.g. in "<body>ul>li*3|</body>" (cursor at `|`) it correctly pulls
-    // out just "ul>li*3", handling emmet's own bracket/quote nesting far
-    // more reliably than a hand-rolled regex would.
-    const extracted = extract(line.text, posInLine, { type });
-    if (!extracted) return false;
+        // `extract` finds the abbreviation immediately before the cursor —
+        // e.g. in "<body>ul>li*3|</body>" (cursor at `|`) it correctly pulls
+        // out just "ul>li*3", handling emmet's own bracket/quote nesting far
+        // more reliably than a hand-rolled regex would.
+        const extracted = extract(line.text, posInLine, { type });
+        if (!extracted) return false;
 
-    let expanded: string;
-    try {
-      expanded = expandAbbreviation(extracted.abbreviation, { syntax });
-    } catch {
-      return false; // not a valid abbreviation -- let Tab fall through to normal indent
-    }
-    if (expanded === extracted.abbreviation) return false; // nothing meaningful to expand
+        let expanded: string;
+        try {
+            expanded = expandAbbreviation(extracted.abbreviation, { syntax });
+        } catch {
+            return false; // not a valid abbreviation -- let Tab fall through to normal indent
+        }
+        if (expanded === extracted.abbreviation) return false; // nothing meaningful to expand
 
-    const insertFrom = line.from + extracted.start;
-    const insertTo = line.from + extracted.end;
-    view.dispatch({
-      changes: { from: insertFrom, to: insertTo, insert: expanded },
-      selection: { anchor: insertFrom + expanded.length },
-    });
-    return true;
-  };
+        const insertFrom = line.from + extracted.start;
+        const insertTo = line.from + extracted.end;
+        view.dispatch({
+            changes: { from: insertFrom, to: insertTo, insert: expanded },
+            selection: { anchor: insertFrom + expanded.length },
+        });
+        return true;
+    };
 }

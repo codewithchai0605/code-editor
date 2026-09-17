@@ -1,8 +1,4 @@
-import {
-    foldService,
-    language,
-    StreamLanguage,
-} from "@codemirror/language";
+import { foldService, language, StreamLanguage } from "@codemirror/language";
 import { countColumn, type EditorState } from "@codemirror/state";
 
 interface FoldRange {
@@ -10,15 +6,9 @@ interface FoldRange {
     to: number;
 }
 
-const foldCache = new WeakMap<
-    EditorState,
-    Map<number, FoldRange | null>
->();
+const foldCache = new WeakMap<EditorState, Map<number, FoldRange | null>>();
 
-function findIndentationFold(
-    state: EditorState,
-    from: number,
-): FoldRange | null {
+function findIndentationFold(state: EditorState, from: number): FoldRange | null {
     const activeLanguage = state.facet(language);
     if (activeLanguage && !(activeLanguage instanceof StreamLanguage)) {
         return null;
@@ -41,27 +31,18 @@ function findIndentationFold(
     const indentation = countColumn(line.text, state.tabSize, indentationEnd);
     let foldEnd: number | null = null;
 
-    for (
-        let lineNumber = line.number + 1;
-        lineNumber <= state.doc.lines;
-        lineNumber++
-    ) {
+    for (let lineNumber = line.number + 1; lineNumber <= state.doc.lines; lineNumber++) {
         const nextLine = state.doc.line(lineNumber);
         const nextIndentationEnd = nextLine.text.search(/\S|$/);
         if (nextIndentationEnd === nextLine.text.length) continue;
 
-        const nextIndentation = countColumn(
-            nextLine.text,
-            state.tabSize,
-            nextIndentationEnd,
-        );
+        const nextIndentation = countColumn(nextLine.text, state.tabSize, nextIndentationEnd);
         if (nextIndentation <= indentation) break;
 
         foldEnd = nextLine.to;
     }
 
-    const range =
-        foldEnd === null ? null : { from: line.to, to: foldEnd };
+    const range = foldEnd === null ? null : { from: line.to, to: foldEnd };
     stateCache.set(line.from, range);
     return range;
 }

@@ -21,7 +21,9 @@ interface LspHoverResult {
 function hoverText(contents: LspHoverResult["contents"]): string {
     if (typeof contents === "string") return contents;
     if (Array.isArray(contents)) {
-        return contents.map((entry) => (typeof entry === "string" ? entry : entry.value)).join("\n\n---\n\n");
+        return contents
+            .map((entry) => (typeof entry === "string" ? entry : entry.value))
+            .join("\n\n---\n\n");
     }
     return contents.value;
 }

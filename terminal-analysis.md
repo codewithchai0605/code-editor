@@ -119,15 +119,15 @@ Without explicit lifecycle semantics, these become annoying bugs.
 
 ### Also handle
 
-* shell exits naturally
-* user closes terminal
-* PTY creation fails
-* shell spawning fails
-* reader fails
-* writer fails
-* app shuts down
-* frontend component unmounts
-* terminal tab gets restored/reopened
+- shell exits naturally
+- user closes terminal
+- PTY creation fails
+- shell spawning fails
+- reader fails
+- writer fails
+- app shuts down
+- frontend component unmounts
+- terminal tab gets restored/reopened
 
 ---
 
@@ -608,7 +608,7 @@ Very useful in a code editor.
 You currently have:
 
 ```ts
-scrollback: 5000
+scrollback: 5000;
 ```
 
 That's reasonable.
@@ -685,7 +685,7 @@ for toggling the terminal panel.
 You're already designing for this:
 
 ```ts
-id: string
+id: string;
 ```
 
 That's good.
@@ -1015,7 +1015,7 @@ PTY error
 process exit code
 ```
 
-This will save you a *lot* of debugging time later.
+This will save you a _lot_ of debugging time later.
 
 ---
 

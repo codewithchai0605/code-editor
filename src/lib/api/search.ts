@@ -8,7 +8,11 @@ import type { ReplaceFileResult, SearchOptions } from "$lib/types/search";
  * Rejects synchronously only for a bad regex/glob, caught before any
  * thread is spawned.
  */
-export function workspaceSearch(searchId: string, root: string, options: SearchOptions): Promise<void> {
+export function workspaceSearch(
+    searchId: string,
+    root: string,
+    options: SearchOptions,
+): Promise<void> {
     return invoke("workspace_search", { searchId, root, options });
 }
 

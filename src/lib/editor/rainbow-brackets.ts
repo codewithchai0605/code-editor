@@ -3,23 +3,9 @@ import { RangeSetBuilder } from "@codemirror/state";
 import type { DecorationSet, ViewUpdate } from "@codemirror/view";
 import { Decoration, EditorView, ViewPlugin } from "@codemirror/view";
 
-const DEFAULT_DARK_COLORS = [
-    "#e5c07b",
-    "#c678dd",
-    "#56b6c2",
-    "#61afef",
-    "#98c379",
-    "#d19a66",
-];
+const DEFAULT_DARK_COLORS = ["#e5c07b", "#c678dd", "#56b6c2", "#61afef", "#98c379", "#d19a66"];
 
-const DEFAULT_LIGHT_COLORS = [
-    "#795e26",
-    "#af00db",
-    "#005cc5",
-    "#008000",
-    "#b15c00",
-    "#267f99",
-];
+const DEFAULT_LIGHT_COLORS = ["#795e26", "#af00db", "#005cc5", "#008000", "#b15c00", "#267f99"];
 
 const MIN_LOOK_BEHIND = 4000;
 const MAX_LOOK_BEHIND = 24000;
@@ -66,17 +52,10 @@ function normalizeHexColor(value: unknown): string | null {
 
 function clampLookBehind(value: number | undefined): number {
     if (!Number.isFinite(value)) return MAX_LOOK_BEHIND;
-    return Math.max(
-        MIN_LOOK_BEHIND,
-        Math.min(MAX_LOOK_BEHIND, Math.floor(value || 0)),
-    );
+    return Math.max(MIN_LOOK_BEHIND, Math.min(MAX_LOOK_BEHIND, Math.floor(value || 0)));
 }
 
-function getScanStart(
-    view: EditorView,
-    lookBehind: number,
-    exactScanLimit: number,
-): number {
+function getScanStart(view: EditorView, lookBehind: number, exactScanLimit: number): number {
     const ranges = view.visibleRanges;
     if (!ranges.length) return 0;
 
@@ -89,15 +68,9 @@ function getScanStart(
     }
 
     const visibleSpan = Math.max(1, lastVisibleTo - firstVisibleFrom);
-    const dynamicLookBehind = Math.max(
-        MIN_LOOK_BEHIND,
-        Math.min(MAX_LOOK_BEHIND, visibleSpan * 3),
-    );
+    const dynamicLookBehind = Math.max(MIN_LOOK_BEHIND, Math.min(MAX_LOOK_BEHIND, visibleSpan * 3));
 
-    return Math.max(
-        0,
-        firstVisibleFrom - Math.max(lookBehind, dynamicLookBehind),
-    );
+    return Math.max(0, firstVisibleFrom - Math.max(lookBehind, dynamicLookBehind));
 }
 
 function isOpeningBracket(char: string): boolean {
@@ -127,12 +100,8 @@ function buildTheme(colors: readonly string[]) {
     return EditorView.baseTheme(themeSpec);
 }
 
-export function getRainbowBracketColors(
-    themeConfig: RainbowBracketThemeConfig = {},
-): string[] {
-    const fallback = themeConfig.dark
-        ? DEFAULT_DARK_COLORS
-        : DEFAULT_LIGHT_COLORS;
+export function getRainbowBracketColors(themeConfig: RainbowBracketThemeConfig = {}): string[] {
+    const fallback = themeConfig.dark ? DEFAULT_DARK_COLORS : DEFAULT_LIGHT_COLORS;
     const colors: string[] = [];
     const seen = new Set<string>();
 

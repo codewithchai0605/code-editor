@@ -7,6 +7,7 @@ a Flutter app living in sibling subfolders), with manual start/stop/restart cont
 VS Code–equivalent editing features.
 
 Decisions this doc assumes (confirmed for this project):
+
 - **Rust owns all LSP protocol logic** — JSON-RPC framing, request/response correlation,
   notification dispatch. The TS frontend never parses raw LSP wire messages; it only
   calls Tauri commands and listens to typed Tauri events.
@@ -87,17 +88,18 @@ Scan the opened folder for marker files, up to a configurable depth (default: a 
 levels, or stop descending once a root is found in a branch — don't keep scanning inside
 a detected project's own subfolders unless it's a known monorepo pattern).
 
-| Marker file(s)                          | Language / toolchain | Suggested server              |
-|------------------------------------------|-----------------------|--------------------------------|
-| `package.json` (+ `tsconfig.json`)       | TypeScript/JavaScript | `typescript-language-server`  |
-| `pubspec.yaml`                           | Dart / Flutter        | Dart Analysis Server (`dart language-server`) |
-| `Cargo.toml`                             | Rust                  | `rust-analyzer`                |
-| `pyproject.toml` / `requirements.txt`    | Python                | `pyright` (or `pylsp`)         |
-| `go.mod`                                 | Go                    | `gopls`                        |
-| `CMakeLists.txt` / `compile_commands.json` | C/C++               | `clangd`                       |
-| `composer.json`                          | PHP                   | `intelephense`                 |
+| Marker file(s)                             | Language / toolchain  | Suggested server                              |
+| ------------------------------------------ | --------------------- | --------------------------------------------- |
+| `package.json` (+ `tsconfig.json`)         | TypeScript/JavaScript | `typescript-language-server`                  |
+| `pubspec.yaml`                             | Dart / Flutter        | Dart Analysis Server (`dart language-server`) |
+| `Cargo.toml`                               | Rust                  | `rust-analyzer`                               |
+| `pyproject.toml` / `requirements.txt`      | Python                | `pyright` (or `pylsp`)                        |
+| `go.mod`                                   | Go                    | `gopls`                                       |
+| `CMakeLists.txt` / `compile_commands.json` | C/C++                 | `clangd`                                      |
+| `composer.json`                            | PHP                   | `intelephense`                                |
 
 Notes:
+
 - A single opened folder can contain **multiple roots** at different subpaths — this is
   exactly the Node + Flutter case. The scanner should return a `Vec<ProjectRoot>`, not a
   single root.
@@ -117,25 +119,25 @@ rebuild. Suggested shape (JSON or TOML), loaded at startup and mergeable with us
 
 ```json
 {
-  "typescript": {
-    "command": "typescript-language-server",
-    "args": ["--stdio"],
-    "rootMarkers": ["package.json", "tsconfig.json"],
-    "fileExtensions": ["ts", "tsx", "js", "jsx"],
-    "initializationOptions": {}
-  },
-  "dart": {
-    "command": "dart",
-    "args": ["language-server", "--protocol=lsp"],
-    "rootMarkers": ["pubspec.yaml"],
-    "fileExtensions": ["dart"]
-  },
-  "rust": {
-    "command": "rust-analyzer",
-    "args": [],
-    "rootMarkers": ["Cargo.toml"],
-    "fileExtensions": ["rs"]
-  }
+    "typescript": {
+        "command": "typescript-language-server",
+        "args": ["--stdio"],
+        "rootMarkers": ["package.json", "tsconfig.json"],
+        "fileExtensions": ["ts", "tsx", "js", "jsx"],
+        "initializationOptions": {}
+    },
+    "dart": {
+        "command": "dart",
+        "args": ["language-server", "--protocol=lsp"],
+        "rootMarkers": ["pubspec.yaml"],
+        "fileExtensions": ["dart"]
+    },
+    "rust": {
+        "command": "rust-analyzer",
+        "args": [],
+        "rootMarkers": ["Cargo.toml"],
+        "fileExtensions": ["rs"]
+    }
 }
 ```
 
@@ -148,6 +150,7 @@ to spawn and where.
 ## 5. Rust-side LSP Manager
 
 ### 5.1 Suggested crates
+
 - `tokio` — async process I/O, tasks
 - `serde` / `serde_json` — message (de)serialization
 - `lsp-types` — gives you strongly-typed Rust structs for the entire LSP spec (requests,
@@ -197,6 +200,7 @@ Content-Length: 123\r\n
 ```
 
 Spawn a reader task per server that:
+
 1. Reads headers until the blank line, parses `Content-Length`.
 2. Reads exactly that many bytes, parses as JSON.
 3. If it has an `id` matching a pending request → resolve the stored `oneshot::Sender`.
@@ -231,6 +235,7 @@ correct `Content-Length` header, write to `stdin`.
 ## 6. Tauri Command / Event Surface
 
 ### Commands (frontend → backend)
+
 Paths and identifiers arrive from the frontend as JSON strings, so they land as `Box<str>`
 at the command boundary; convert to `Box<Path>` once past it and storing/looking up by
 path internally.
@@ -258,6 +263,7 @@ path internally.
 keep that crate's own `String`/`Vec` fields internally — see Memory Conventions above.)
 
 ### Events (backend → frontend)
+
 - `lsp://diagnostics` — `{ file, diagnostics: [...] }`
 - `lsp://server-status-changed` — `{ server_id, status }`
 - `lsp://progress` — `$/progress` passthrough (rust-analyzer indexing, etc.)
@@ -271,20 +277,20 @@ to the frontend.
 
 ## 7. Feature Mapping (VS Code parity)
 
-| LSP capability                     | Editor feature                              | CodeMirror integration point         |
-|-------------------------------------|----------------------------------------------|----------------------------------------|
-| `textDocument/completion`           | Autocomplete                                  | `autocompletion()` source              |
-| `textDocument/hover`                | Hover tooltips                                | `hoverTooltip()`                       |
-| `textDocument/publishDiagnostics`   | Red/yellow underlines, problems panel         | `linter()` / diagnostic decorations    |
-| `textDocument/definition`           | Go to Definition (Ctrl/Cmd+Click, F12)        | click handler + jump-to-location       |
-| `textDocument/references`           | Find All References panel                     | custom panel, reuse location list      |
-| `textDocument/rename`               | Rename Symbol (F2)                            | inline rename UI + apply `WorkspaceEdit` |
-| `textDocument/codeAction`           | Lightbulb / quick fixes                       | gutter icon + menu                     |
-| `textDocument/documentSymbol`       | Outline view, breadcrumbs                     | sidebar tree / breadcrumb bar          |
-| `workspace/symbol`                  | Go to Symbol in Workspace (Ctrl+T)             | command palette / quick-open           |
-| `textDocument/signatureHelp`        | Parameter hints while typing                  | tooltip near cursor                    |
-| `textDocument/formatting`           | Format Document / Format Selection             | command + apply `TextEdit[]`           |
-| `textDocument/semanticTokens`       | Enhanced syntax highlighting (optional, later) | CodeMirror decoration layer            |
+| LSP capability                    | Editor feature                                 | CodeMirror integration point             |
+| --------------------------------- | ---------------------------------------------- | ---------------------------------------- |
+| `textDocument/completion`         | Autocomplete                                   | `autocompletion()` source                |
+| `textDocument/hover`              | Hover tooltips                                 | `hoverTooltip()`                         |
+| `textDocument/publishDiagnostics` | Red/yellow underlines, problems panel          | `linter()` / diagnostic decorations      |
+| `textDocument/definition`         | Go to Definition (Ctrl/Cmd+Click, F12)         | click handler + jump-to-location         |
+| `textDocument/references`         | Find All References panel                      | custom panel, reuse location list        |
+| `textDocument/rename`             | Rename Symbol (F2)                             | inline rename UI + apply `WorkspaceEdit` |
+| `textDocument/codeAction`         | Lightbulb / quick fixes                        | gutter icon + menu                       |
+| `textDocument/documentSymbol`     | Outline view, breadcrumbs                      | sidebar tree / breadcrumb bar            |
+| `workspace/symbol`                | Go to Symbol in Workspace (Ctrl+T)             | command palette / quick-open             |
+| `textDocument/signatureHelp`      | Parameter hints while typing                   | tooltip near cursor                      |
+| `textDocument/formatting`         | Format Document / Format Selection             | command + apply `TextEdit[]`             |
+| `textDocument/semanticTokens`     | Enhanced syntax highlighting (optional, later) | CodeMirror decoration layer              |
 
 Only expose a feature in the UI if the connected server's `ServerCapabilities` actually
 advertised it — this avoids showing "Rename" for a server that doesn't support it.
@@ -311,8 +317,8 @@ advertised it — this avoids showing "Rename" for a server that doesn't support
 2. `ProjectScanner` walks the tree, finds both marker files, returns:
    `[{root: "/project/backend", language: "typescript"}, {root: "/project/app", language: "dart"}]`.
 3. Depending on config, either:
-   - **Eager mode**: `LspManager` starts both servers immediately, or
-   - **Lazy mode** (recommended default): nothing starts yet.
+    - **Eager mode**: `LspManager` starts both servers immediately, or
+    - **Lazy mode** (recommended default): nothing starts yet.
 4. User opens `backend/src/index.ts` → router walks up from the file path, finds root
    `/project/backend` registered for `typescript` → if not already running (lazy mode),
    `lsp_start("/project/backend", "typescript")` is called automatically, then

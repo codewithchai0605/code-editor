@@ -1,38 +1,38 @@
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
-  keymap,
-  lineNumbers,
-  highlightActiveLine,
-  highlightActiveLineGutter,
-  highlightSpecialChars,
-  drawSelection,
-  dropCursor,
-  rectangularSelection,
-  crosshairCursor,
+    keymap,
+    lineNumbers,
+    highlightActiveLine,
+    highlightActiveLineGutter,
+    highlightSpecialChars,
+    drawSelection,
+    dropCursor,
+    rectangularSelection,
+    crosshairCursor,
 } from "@codemirror/view";
 import {
-  defaultKeymap,
-  history,
-  historyKeymap,
-  indentWithTab,
-  moveLineUp,
-  moveLineDown,
-  copyLineUp,
-  copyLineDown,
+    defaultKeymap,
+    history,
+    historyKeymap,
+    indentWithTab,
+    moveLineUp,
+    moveLineDown,
+    copyLineUp,
+    copyLineDown,
 } from "@codemirror/commands";
+import { indentOnInput, bracketMatching, foldGutter, foldKeymap } from "@codemirror/language";
 import {
-  indentOnInput,
-  bracketMatching,
-  foldGutter,
-  foldKeymap,
-} from "@codemirror/language";
-import {
-  searchKeymap,
-  highlightSelectionMatches,
-  openSearchPanel,
-  selectNextOccurrence,
+    searchKeymap,
+    highlightSelectionMatches,
+    openSearchPanel,
+    selectNextOccurrence,
 } from "@codemirror/search";
-import { closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap } from "@codemirror/autocomplete";
+import {
+    closeBrackets,
+    closeBracketsKeymap,
+    autocompletion,
+    completionKeymap,
+} from "@codemirror/autocomplete";
 import { lintGutter, lintKeymap } from "@codemirror/lint";
 import type { Theme } from "./themes/types";
 import { buildCmTheme } from "./themeEngine";
@@ -66,12 +66,11 @@ import { lspCodeActionCommand } from "$lib/lsp/code-action";
  */
 export const themeCompartment = new Compartment();
 
-
 function createFoldMarker(open: boolean) {
-  const marker = document.createElement("span");
-  marker.className = "fold-marker";
+    const marker = document.createElement("span");
+    marker.className = "fold-marker";
 
-  marker.innerHTML = `
+    marker.innerHTML = `
     <svg
       viewBox="0 0 16 16"
       width="14"
@@ -89,8 +88,8 @@ function createFoldMarker(open: boolean) {
     </svg>
   `;
 
-  return marker;
-};
+    return marker;
+}
 
 /**
  * This deliberately mirrors CodeMirror's own `basicSetup` ingredient list
@@ -123,88 +122,92 @@ function createFoldMarker(open: boolean) {
  * `Language` instance to hang off of, which isn't available yet at this
  * point for a freshly-opened tab.
  */
-export function baseExtensions(onSave: () => void, initialTheme: Theme, filePath?: string): Extension[] {
-  const emmetExpand = filePath ? emmetExpandCommand(extensionOf(filePath)) : null;
+export function baseExtensions(
+    onSave: () => void,
+    initialTheme: Theme,
+    filePath?: string,
+): Extension[] {
+    const emmetExpand = filePath ? emmetExpandCommand(extensionOf(filePath)) : null;
 
-  return [
-    lineNumbers(),
-    ...(filePath ? gitGutter(filePath) : []),
-    highlightActiveLineGutter(),
-    highlightSpecialChars(),
-    history(),
-    foldGutter({
-      markerDOM(open) {
-        return createFoldMarker(open);
-      },
-    }),
-    drawSelection(),
-    dropCursor(),
-    EditorState.allowMultipleSelections.of(true),
-    indentOnInput(),
-    bracketMatching(),
-    closeBrackets(),
-    autocompletion(),
-    rectangularSelection(),
-    crosshairCursor(),
-    highlightActiveLine(),
-    highlightSelectionMatches(),
-    searchExtension(),
-    indentGuides(),
-    rainbowBrackets(),
-    tagAutoRename(),
-    indentationFolding,
-    colorChips(),
-    lintGutter(),
-    themeCompartment.of(buildCmTheme(initialTheme)),
-    ...(filePath
-      ? [
-        lspDiagnostics(pathToFileUri(filePath)),
-        lspCompletionSource(filePath),
-        lspHoverTooltip(filePath),
-        lspSignatureHelpTooltip(filePath),
-        lspDefinitionHandler(filePath),
-        lspRenameExtension(),
-      ]
-      : []),
-    keymap.of([
-      {
-        key: "Mod-s",
-        preventDefault: true,
-        run: () => {
-          onSave();
-          return true;
-        },
-      },
-      { key: "Mod-f", run: openSearchPanel },
-      { key: "Mod-d", run: selectNextOccurrence },
-      { key: "Alt-F3", run: goToNextGitChange },
-      { key: "Shift-Alt-F3", run: goToPreviousGitChange },
-      { key: "Alt-ArrowUp", run: moveLineUp },
-      { key: "Alt-ArrowDown", run: moveLineDown },
-      { key: "Shift-Alt-ArrowUp", run: copyLineUp },
-      { key: "Shift-Alt-ArrowDown", run: copyLineDown },
-      ...(filePath
-        ? [
-          { key: "F12", preventDefault: true, run: lspGoToDefinitionCommand(filePath) },
-          { key: "F2", preventDefault: true, run: lspRenameCommand(filePath) },
-          { key: "Mod-.", preventDefault: true, run: lspCodeActionCommand(filePath) },
-        ]
-        : []),
-      ...closeBracketsKeymap,
-      ...defaultKeymap,
-      ...searchKeymap.filter((binding) => binding.key !== "Mod-f"),
-      ...historyKeymap,
-      ...foldKeymap,
-      ...completionKeymap,
-      ...lintKeymap,
-      // Tried before `indentWithTab` so an Emmet-expandable file gets a
-      // real expansion on Tab when the cursor sits after a valid
-      // abbreviation; `emmetExpand` itself returns false (falling through
-      // to ordinary indent) for anything that isn't one, an active
-      // selection, or a non-markup/stylesheet file (where it's `null` and
-      // never added at all).
-      ...(emmetExpand ? [{ key: "Tab", run: emmetExpand }] : []),
-      indentWithTab,
-    ]),
-  ];
+    return [
+        lineNumbers(),
+        ...(filePath ? gitGutter(filePath) : []),
+        highlightActiveLineGutter(),
+        highlightSpecialChars(),
+        history(),
+        foldGutter({
+            markerDOM(open) {
+                return createFoldMarker(open);
+            },
+        }),
+        drawSelection(),
+        dropCursor(),
+        EditorState.allowMultipleSelections.of(true),
+        indentOnInput(),
+        bracketMatching(),
+        closeBrackets(),
+        autocompletion(),
+        rectangularSelection(),
+        crosshairCursor(),
+        highlightActiveLine(),
+        highlightSelectionMatches(),
+        searchExtension(),
+        indentGuides(),
+        rainbowBrackets(),
+        tagAutoRename(),
+        indentationFolding,
+        colorChips(),
+        lintGutter(),
+        themeCompartment.of(buildCmTheme(initialTheme)),
+        ...(filePath
+            ? [
+                  lspDiagnostics(pathToFileUri(filePath)),
+                  lspCompletionSource(filePath),
+                  lspHoverTooltip(filePath),
+                  lspSignatureHelpTooltip(filePath),
+                  lspDefinitionHandler(filePath),
+                  lspRenameExtension(),
+              ]
+            : []),
+        keymap.of([
+            {
+                key: "Mod-s",
+                preventDefault: true,
+                run: () => {
+                    onSave();
+                    return true;
+                },
+            },
+            { key: "Mod-f", run: openSearchPanel },
+            { key: "Mod-d", run: selectNextOccurrence },
+            { key: "Alt-F3", run: goToNextGitChange },
+            { key: "Shift-Alt-F3", run: goToPreviousGitChange },
+            { key: "Alt-ArrowUp", run: moveLineUp },
+            { key: "Alt-ArrowDown", run: moveLineDown },
+            { key: "Shift-Alt-ArrowUp", run: copyLineUp },
+            { key: "Shift-Alt-ArrowDown", run: copyLineDown },
+            ...(filePath
+                ? [
+                      { key: "F12", preventDefault: true, run: lspGoToDefinitionCommand(filePath) },
+                      { key: "F2", preventDefault: true, run: lspRenameCommand(filePath) },
+                      { key: "Mod-.", preventDefault: true, run: lspCodeActionCommand(filePath) },
+                  ]
+                : []),
+            ...closeBracketsKeymap,
+            ...defaultKeymap,
+            ...searchKeymap.filter((binding) => binding.key !== "Mod-f"),
+            ...historyKeymap,
+            ...foldKeymap,
+            ...completionKeymap,
+            ...lintKeymap,
+            // Tried before `indentWithTab` so an Emmet-expandable file gets a
+            // real expansion on Tab when the cursor sits after a valid
+            // abbreviation; `emmetExpand` itself returns false (falling through
+            // to ordinary indent) for anything that isn't one, an active
+            // selection, or a non-markup/stylesheet file (where it's `null` and
+            // never added at all).
+            ...(emmetExpand ? [{ key: "Tab", run: emmetExpand }] : []),
+            indentWithTab,
+        ]),
+    ];
 }
