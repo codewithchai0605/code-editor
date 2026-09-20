@@ -11,6 +11,20 @@ use std::sync::{Arc, Mutex};
 pub struct AppState {
     pub workspace_root: Mutex<Option<PathBuf>>,
     pub watcher: Mutex<Option<Debouncer<RecommendedWatcher>>>,
+    /// A folder path the OS asked this app to open — from a command-line
+    /// argument on cold start (Windows/Linux), a `RunEvent::Opened` launch
+    /// (macOS), or a later launch that `tauri-plugin-single-instance`
+    /// redirected into this already-running instance. Set once by whichever
+    /// of those fired, and read (and cleared) exactly once by the frontend's
+    /// `take_pending_open_path` call on startup — see
+    /// `commands::native_integration`. A plain `Mutex<Option<String>>`
+    /// rather than an event-only handoff because the frontend's listener
+    /// for a *live* "already running" launch is registered well after the
+    /// window exists, so a launch that raced ahead of that registration
+    /// (in particular every cold start, and macOS's `Opened` event, which
+    /// can fire before the page has finished loading) would otherwise be
+    /// silently missed.
+    pub pending_open_path: Mutex<Option<String>>,
 }
 
 /// The PTY/process handles for a session that's actually alive. Split out

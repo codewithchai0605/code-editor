@@ -10,8 +10,10 @@ import {
     copyPaths,
     movePaths,
 } from "$lib/api/fs";
-import { isFsError, type FsEntry } from "$lib/types/fs";
+import { isFsError, type FsChangedPayload, type FsEntry } from "$lib/types/fs";
 import { baseName, parentOf } from "$lib/utils/path";
+import { describeFsError } from "$lib/utils/fsError";
+import { takePendingOpenPath } from "$lib/api/nativeIntegration";
 import { gitStore } from "./git.svelte";
 import { toastStore } from "./toast.svelte";
 import { lspStore } from "$lib/lsp/manager.svelte";
@@ -42,13 +44,6 @@ interface PendingConflict {
     conflictingPaths: string[];
 }
 
-function describeError(err: unknown): string {
-    if (isFsError(err)) {
-        return err.message ?? "Something went wrong.";
-    }
-    return err instanceof Error ? err.message : String(err);
-}
-
 class WorkspaceState {
     rootPath = $state<string | null>(null);
     rootName = $state<string>("");
@@ -65,13 +60,14 @@ class WorkspaceState {
     copyProgress = $state<{ done: number; total: number } | null>(null);
     lastError = $state<string | null>(null);
     private fsListenerStarted = false;
+    private openFolderListenerStarted = false;
 
     /** Sets `lastError` (still read directly in a couple of places) and
      *  surfaces the same message as a toast — a file operation the user
      *  just triggered (rename, delete, copy/move) failing is exactly the
      *  kind of thing worth a visible, if transient, notification. */
     private reportError(err: unknown): void {
-        const message = describeError(err);
+        const message = describeFsError(err);
         this.lastError = message;
         toastStore.error(message);
     }
@@ -86,16 +82,37 @@ class WorkspaceState {
 
     /** Wires up the backend's `fs:changed` events (emitted by the workspace
      *  file watcher started in fs.rs's `open_workspace`) to re-fetch whatever
-     *  directories they touch. The watcher itself has always been running —
-     *  nothing on this side was listening for its events, so an external
-     *  change (another program's checkout, `npm install`, a build script)
-     *  never showed up in the tree until the app was restarted. Call once,
-     *  e.g. from Shell.svelte's onMount. */
+     *  directories they touch. `editorStore` listens for the same event
+     *  independently (see its own `initFsWatcherListener`) to reload any
+     *  open tab whose exact file was touched — kept as two separate
+     *  listeners rather than this one reaching into `editorStore` so the
+     *  two stores don't end up importing each other. Call once, e.g. from
+     *  Shell.svelte's onMount. */
     initFsWatcherListener(): void {
         if (this.fsListenerStarted) return;
         this.fsListenerStarted = true;
-        listen<string[]>("fs:changed", (event) => {
-            for (const dir of event.payload) this.refresh(dir);
+        listen<FsChangedPayload>("fs:changed", (event) => {
+            for (const dir of event.payload.dirs) this.refresh(dir);
+        });
+    }
+
+    /** Wires up "this app was launched (or re-launched) to open a specific
+     *  folder" — the whole point of a folder's right-click "Open with...".
+     *  See native_integration.rs's `take_pending_open_path` / `set_pending_
+     *  open_path` for why this both checks a one-shot value *and* listens
+     *  for a live event: a cold start's folder argument, and in particular
+     *  macOS's `RunEvent::Opened`, can arrive before this listener even
+     *  exists, so a live-only listener would silently miss exactly the
+     *  "double-click/right-click the app icon with a folder" case this
+     *  feature is for. Call once, e.g. from Shell.svelte's onMount. */
+    initOpenFolderListener(): void {
+        if (this.openFolderListenerStarted) return;
+        this.openFolderListenerStarted = true;
+        void takePendingOpenPath().then((path) => {
+            if (path) void this.open(path);
+        });
+        listen<{ path: string }>("open-folder-request", (event) => {
+            void this.open(event.payload.path);
         });
     }
 
@@ -161,7 +178,7 @@ class WorkspaceState {
             this.dirs.set(entry.path, { children: entries, loading: false });
         } catch (err) {
             this.dirs.set(entry.path, { children: [], loading: false });
-            this.lastError = describeError(err);
+            this.lastError = describeFsError(err);
         }
     }
 
@@ -191,11 +208,33 @@ class WorkspaceState {
 
     async confirmCreate(name: string): Promise<void> {
         if (!this.creating) return;
-        const { parentDir } = this.creating;
+        const { parentDir, isDir } = this.creating;
         try {
-            await createEntry(parentDir, name, this.creating.isDir);
+            const { entry, createdDirs } = await createEntry(parentDir, name, isDir);
             this.creating = null;
+
+            // `name` may itself be a nested path ("lib/date.ts") — fs.rs's
+            // `create_entry` reports every intermediate folder it had to
+            // make along the way in `createdDirs` (root to leaf, already-
+            // existing folders excluded). Walk those and expand+populate
+            // each so the tree opens straight down to the new entry,
+            // instead of e.g. creating "lib" but leaving it collapsed
+            // (and, until expanded, looking empty) for the user to notice
+            // and open by hand.
+            for (const dir of createdDirs) {
+                this.expanded.add(dir.path);
+                try {
+                    this.dirs.set(dir.path, { children: await readDir(dir.path), loading: false });
+                } catch {
+                    // Best-effort — a refresh from the watcher will catch
+                    // it if this races with something else touching the
+                    // same folder.
+                }
+            }
             await this.refresh(parentDir);
+            if (isDir) this.expanded.add(entry.path);
+
+            this.select(entry.path);
         } catch (err) {
             this.reportError(err);
         }

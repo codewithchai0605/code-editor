@@ -62,6 +62,13 @@
             ></span>
             <span class="name" data-git-status={gitStatus}>{baseName(tab.path)}</span>
             {#if tab.isDirty}<span class="dirty" aria-hidden="true"></span>{/if}
+            {#if tab.changedOnDisk}
+                <span
+                    class="changed-on-disk"
+                    title="Changed on disk since you started editing here — saving will overwrite that change."
+                    aria-label="Changed on disk since you started editing">⚠</span
+                >
+            {/if}
             {#if gitStatus}
                 <span class="git-badge" data-git-status={gitStatus}>{GIT_BADGE[gitStatus]}</span>
             {/if}
@@ -199,6 +206,15 @@
         height: 8px;
         border-radius: 50%;
         background: var(--color-text-muted);
+    }
+    .changed-on-disk {
+        flex-shrink: 0;
+        font-size: 11px;
+        line-height: 1;
+        /* Same amber as .name[data-git-status="modified"] above — both mean
+           "differs from a known-good baseline", just a different baseline
+           (disk vs. the git index). */
+        color: #e2c08d;
     }
     .close {
         flex-shrink: 0;

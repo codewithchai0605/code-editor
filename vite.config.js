@@ -20,7 +20,7 @@ export default defineConfig(async () => ({
     // pre-bundled at server start instead, before anything can trigger that
     // mid-session reload.
     optimizeDeps: {
-        include: ["@xterm/xterm", "@xterm/addon-fit"],
+        include: ["@xterm/xterm", "@xterm/addon-fit", "@xterm/addon-web-links", "@xterm/addon-canvas"],
     },
 
     // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
@@ -34,10 +34,10 @@ export default defineConfig(async () => ({
         host: host || false,
         hmr: host
             ? {
-                  protocol: "ws",
-                  host,
-                  port: 1421,
-              }
+                protocol: "ws",
+                host,
+                port: 1421,
+            }
             : undefined,
         watch: {
             // 3. tell Vite to ignore watching `src-tauri`

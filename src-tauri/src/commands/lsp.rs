@@ -22,7 +22,8 @@ pub async fn lsp_detect_roots(
 }
 
 /// Starts (or reuses) the server for `language_id` at `root`, looked up
-/// from the current workspace's `.codeeditor/lsp-servers.json` registry.
+/// from the current workspace's registry (managed by this app, not the
+/// project — see `registry.rs`'s module doc comment).
 #[tauri::command]
 pub async fn lsp_start(
     app: AppHandle,
@@ -56,6 +57,23 @@ pub async fn lsp_restart(
     manager.restart(app, PathBuf::from(root), language_id).await
 }
 
+/// Runs the configured auto-install for `language_id` (npm/pip/go install,
+/// or a direct download for rust-analyzer — see `registry.rs`'s
+/// `InstallStrategy`), then starts it. What the status bar's "Install"
+/// button calls when a server's status is `Crashed { installable: true,
+/// .. }` — see `ServerStatus`'s doc comment for what sets that.
+#[tauri::command]
+pub async fn lsp_install(
+    app: AppHandle,
+    manager: State<'_, LspManager>,
+    root: String,
+    language_id: String,
+) -> Result<(), String> {
+    manager
+        .install_and_start(app, PathBuf::from(root), language_id)
+        .await
+}
+
 /// Stops every server this manager knows about — backs both "close
 /// workspace" cleanup and the "LSP: Stop All Servers" command.
 #[tauri::command]
@@ -78,11 +96,13 @@ pub async fn lsp_list_servers(manager: State<'_, LspManager>) -> Result<Box<[Ser
 /// frontend's cue not to offer a picker for it at all.
 #[tauri::command]
 pub fn lsp_list_variants(
+    app: AppHandle,
     workspace: String,
     root: String,
     language_id: String,
 ) -> Option<VariantInfo> {
     registry::list_variants(
+        &app,
         &PathBuf::from(workspace),
         &language_id,
         &PathBuf::from(root),
@@ -96,17 +116,71 @@ pub fn lsp_list_variants(
 /// documents path `restart` already goes through, not a special case.
 #[tauri::command]
 pub fn lsp_set_variant_override(
+    app: AppHandle,
     workspace: String,
     root: String,
     language_id: String,
     variant: String,
 ) -> Result<(), String> {
     registry::set_root_override(
+        &app,
         &PathBuf::from(workspace),
         &PathBuf::from(root),
         &language_id,
         &variant,
     )
+}
+
+/// Every server config in `workspace`'s registry, flattened to one row
+/// per editable server — what a Settings "Language Servers" page lists.
+#[tauri::command]
+pub fn lsp_list_server_configs(
+    app: AppHandle,
+    workspace: String,
+) -> Vec<registry::ServerConfigInfo> {
+    registry::list_server_configs(&app, &PathBuf::from(workspace))
+}
+
+/// Creates or updates one server entry (or one variant of a `Multi`
+/// language) from Settings. See `registry::upsert_server_config` for
+/// exactly what "update" preserves vs. overwrites.
+#[tauri::command]
+pub fn lsp_upsert_server_config(
+    app: AppHandle,
+    workspace: String,
+    language_id: String,
+    variant: Option<String>,
+    command: String,
+    args: Vec<String>,
+    root_markers: Vec<String>,
+) -> Result<(), String> {
+    registry::upsert_server_config(
+        &app,
+        &PathBuf::from(workspace),
+        &language_id,
+        variant.as_deref(),
+        command,
+        args,
+        root_markers,
+    )
+}
+
+/// Removes a language entirely (every variant, for a `Multi` one) from a
+/// workspace's registry.
+#[tauri::command]
+pub fn lsp_delete_server_config(
+    app: AppHandle,
+    workspace: String,
+    language_id: String,
+) -> Result<(), String> {
+    registry::delete_server_config(&app, &PathBuf::from(workspace), &language_id)
+}
+
+/// Discards every customization for this workspace, falling back to the
+/// built-in defaults again. Settings' "Restore Defaults".
+#[tauri::command]
+pub fn lsp_reset_workspace_config(app: AppHandle, workspace: String) -> Result<(), String> {
+    registry::reset_workspace_config(&app, &PathBuf::from(workspace))
 }
 
 /// This server's captured stderr / `window/logMessage` output, most

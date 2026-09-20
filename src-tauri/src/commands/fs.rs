@@ -63,6 +63,22 @@ struct CopyProgress {
     total: usize,
 }
 
+/// Payload for the `fs:changed` event. `dirs` is the parent directories that
+/// might need re-listing (the tree's job — a no-op for anything not
+/// currently expanded). `paths` is every individual path notify actually
+/// saw touched, *not* reduced to parents — this is what lets an open editor
+/// tab match itself against the event directly (see `EditorStore`'s
+/// `handleExternalChange` on the frontend) instead of only ever finding out
+/// its file changed the next time someone happens to reopen it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FsChangedPayload {
+    // Same reasoning as `CopyProgress` above for deriving `Clone`:
+    // `Emitter::emit` requires it.
+    dirs: Box<[Box<str>]>,
+    paths: Box<[Box<str>]>,
+}
+
 // ---------------------------------------------------------------------------
 // Name validation (mirrors src/lib/utils/validateName.ts on the frontend —
 // that copy gives instant feedback, this one is the actual security
@@ -165,26 +181,79 @@ pub fn read_dir(path: String) -> Result<Box<[FsEntry]>, FsError> {
 // Workspace + file watcher
 // ---------------------------------------------------------------------------
 
-/// Watches `root` and emits `fs:changed` with the set of parent directories
-/// that need re-fetching. We don't try to diff exactly what changed — the
-/// frontend already knows which directories it currently has expanded, so
-/// "this directory might be stale, refetch it if you care" is all it needs,
-/// and it's far simpler than trying to replicate notify's rename-matching
-/// logic on the JS side too.
+/// True if any path component of `path` is one of `ALWAYS_SKIP_DIRS` (see
+/// below — the same list `list_workspace_files` prunes for Quick Open).
+/// Applied to every raw watcher event *before* it costs anything else: no
+/// string allocation for the hashsets, no emit, nothing. This is what keeps
+/// `npm install`/`cargo build`/a `.git` fetch from turning into tens of
+/// thousands of debounced events on every keystroke-adjacent moment — those
+/// directories are never shown in the tree unless explicitly expanded, and
+/// nothing in the app indexes into them either (search and Quick Open skip
+/// them the same way), so their churn is pure overhead today.
+///
+/// This only filters what the *debouncer* does with an event, not whether
+/// the OS-level watch exists in the first place — `notify`'s recursive mode
+/// still places an inotify/FSEvents/ReadDirectoryChangesW watch on every
+/// subdirectory, `node_modules` included. On very large trees that can
+/// still hit a platform's watch-descriptor ceiling; avoiding that requires
+/// hand-rolling non-recursive, dynamically-added-and-removed per-directory
+/// watches instead of `RecursiveMode::Recursive`, which is a much bigger
+/// (and riskier) change than this pass makes — worth a dedicated follow-up
+/// if it turns out to matter in practice, but the filtering here already
+/// removes the actual CPU/memory/IPC cost for the common case.
+fn is_ignored(path: &Path) -> bool {
+    path.components().any(|c| {
+        if let std::path::Component::Normal(name) = c {
+            if let Some(name) = name.to_str() {
+                return ALWAYS_SKIP_DIRS.contains(&name);
+            }
+        }
+        false
+    })
+}
+
+/// Watches `root` and emits `fs:changed` with both the parent directories
+/// that might need re-listing and the exact paths notify saw touched (see
+/// `FsChangedPayload`). We don't try to fully diff what changed — the
+/// frontend already knows which directories it currently has expanded and
+/// which files it currently has open, so "these might be stale, act on them
+/// if you care" is all either side needs, and it's far simpler than trying
+/// to replicate notify's rename-matching logic on the JS side too.
 fn start_watcher(app: &AppHandle, state: &State<AppState>, root: &Path) {
     let app_handle = app.clone();
     let debouncer = new_debouncer(
-        Duration::from_millis(400),
+        // Short enough that a single external edit (another editor, an
+        // agent, a script) shows up as close to instantly as a debounce can
+        // get away with, while still collapsing a burst of rapid writes
+        // (a save that touches several files, a fast `git checkout`) into
+        // one event instead of one per file.
+        Duration::from_millis(200),
         move |result: DebounceEventResult| {
             let Ok(events) = result else { return };
-            let dirs: HashSet<String> = events
-                .iter()
-                .filter_map(|e| e.path.parent())
-                .map(|p| p.to_string_lossy().to_string())
-                .collect();
-            if !dirs.is_empty() {
-                let _ = app_handle.emit("fs:changed", dirs.into_iter().collect::<Vec<_>>());
+            let mut dirs: HashSet<String> = HashSet::new();
+            let mut paths: HashSet<String> = HashSet::new();
+            for e in events.iter().filter(|e| !is_ignored(&e.path)) {
+                if let Some(parent) = e.path.parent() {
+                    dirs.insert(parent.to_string_lossy().to_string());
+                }
+                paths.insert(e.path.to_string_lossy().to_string());
             }
+            if dirs.is_empty() && paths.is_empty() {
+                return;
+            }
+            let payload = FsChangedPayload {
+                dirs: dirs
+                    .into_iter()
+                    .map(String::into_boxed_str)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice(),
+                paths: paths
+                    .into_iter()
+                    .map(String::into_boxed_str)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice(),
+            };
+            let _ = app_handle.emit("fs:changed", payload);
         },
     );
 
@@ -226,10 +295,92 @@ pub fn open_workspace(
 // Create / rename / delete
 // ---------------------------------------------------------------------------
 
+/// Splits a possibly-nested `name` like `"lib/date.ts"` or `"lib\\date.ts"`
+/// into validated path segments, so `create_entry` can create any missing
+/// intermediate folders in one call instead of requiring "New Folder" once
+/// per level. Accepts either separator regardless of host OS, and collapses
+/// repeated/leading/trailing separators (`"/lib/date.ts"`, `"lib//date.ts"`)
+/// rather than erroring on them.
+///
+/// Every segment goes through the same `validate_name` a single-level
+/// create/rename does, which is also what keeps this from ever resolving
+/// outside `parent_dir`: a `".."` segment is rejected outright ("That name
+/// isn't allowed"), and a bare drive letter like `"C:"` is rejected for
+/// containing `:`, so there's no spelling of `name` that can climb above or
+/// switch out from under `parent_dir`.
+fn split_relative_segments(name: &str) -> Result<Vec<String>, FsError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(FsError::InvalidName {
+            message: "Name can't be empty.".into(),
+        });
+    }
+    let segments: Vec<String> = trimmed
+        .split(['/', '\\'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    if segments.is_empty() {
+        return Err(FsError::InvalidName {
+            message: "Name can't be empty.".into(),
+        });
+    }
+    for seg in &segments {
+        validate_name(seg)?;
+    }
+    Ok(segments)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateEntryResult {
+    pub entry: FsEntry,
+    /// Every intermediate folder along `name`'s path that didn't already
+    /// exist, root-to-leaf — e.g. creating `"lib/utils/date.ts"` in an
+    /// empty `parent_dir` reports both `lib` and `lib/utils` here. Lets the
+    /// frontend expand and populate the tree straight down to the new
+    /// entry instead of leaving a freshly-made `lib` collapsed (and, until
+    /// expanded, looking empty) for the user to notice and open by hand.
+    /// Folders that already existed aren't included — nothing about them
+    /// changed, so nothing needs refreshing.
+    pub created_dirs: Box<[FsEntry]>,
+}
+
 #[tauri::command]
-pub fn create_entry(parent_dir: String, name: String, is_dir: bool) -> Result<FsEntry, FsError> {
-    validate_name(&name)?;
-    let target = Path::new(&parent_dir).join(name.trim());
+pub fn create_entry(
+    parent_dir: String,
+    name: String,
+    is_dir: bool,
+) -> Result<CreateEntryResult, FsError> {
+    let segments = split_relative_segments(&name)?;
+    let (dir_segments, last_segment) = segments.split_at(segments.len() - 1);
+
+    let mut target = PathBuf::from(&parent_dir);
+    let mut created_dirs = Vec::new();
+    for seg in dir_segments {
+        target.push(seg);
+        if target.is_file() {
+            return Err(FsError::InvalidName {
+                message: format!(
+                    "\"{}\" already exists and isn't a folder.",
+                    target.file_name().map_or_else(
+                        || target.to_string_lossy().into_owned(),
+                        |n| n.to_string_lossy().into_owned()
+                    )
+                )
+                .into_boxed_str(),
+            });
+        }
+        if !target.exists() {
+            std::fs::create_dir(&target)?;
+            created_dirs.push(entry_for(&target)?);
+        }
+    }
+
+    // `last_segment` is exactly one element — `segments.split_at(len - 1)`
+    // guarantees that for any non-empty `segments`.
+    target.push(&last_segment[0]);
     if target.exists() {
         return Err(FsError::Conflict {
             paths: Box::from([target.to_string_lossy().into_owned().into_boxed_str()]),
@@ -240,7 +391,11 @@ pub fn create_entry(parent_dir: String, name: String, is_dir: bool) -> Result<Fs
     } else {
         std::fs::File::create(&target)?;
     }
-    entry_for(&target)
+
+    Ok(CreateEntryResult {
+        entry: entry_for(&target)?,
+        created_dirs: created_dirs.into_boxed_slice(),
+    })
 }
 
 #[tauri::command]
@@ -548,4 +703,105 @@ pub fn list_workspace_files(root: String) -> Result<Box<[Box<str>]>, FsError> {
     }
 
     Ok(out.into_boxed_slice())
+}
+
+// ---------------------------------------------------------------------------
+// "Reveal in File Explorer" / "Reveal in Finder" — opens the host OS's file
+// manager with `path` selected, for either a file or a folder (the file
+// tree's context menu offers this for both). Implemented with plain
+// `std::process::Command` calls rather than through `tauri-plugin-opener`'s
+// `revealItemInDir`: this crate already spawns child processes elsewhere
+// (pty.rs's shells, git.rs's `git` invocations), so doing the same here
+// keeps this command running under whatever capability setup the rest of
+// this file's commands already have, rather than needing a separate plugin
+// permission granted on top.
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn reveal_in_file_manager(path: String) -> Result<(), FsError> {
+    let path = PathBuf::from(path);
+
+    #[cfg(target_os = "windows")]
+    {
+        // `/select,` highlights `path` itself inside its parent folder's
+        // Explorer window — the same call for a file or a folder. Explorer
+        // quite often exits non-zero even after a completely successful
+        // reveal (a long-standing quirk of explorer.exe, unrelated to this
+        // flag specifically), so a successful *spawn* is treated as success
+        // here rather than checking the exit status.
+        std::process::Command::new("explorer")
+            .arg("/select,")
+            .arg(&path)
+            .spawn()?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // `-R` reveals `path` selected in Finder — again, the same call
+        // works for a file or a folder.
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .spawn()?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        reveal_on_linux(&path)?;
+    }
+
+    Ok(())
+}
+
+/// Minimal RFC 3986 percent-encoding for turning a filesystem path into a
+/// `file://` URI — only escapes what isn't in the unreserved set, leaving
+/// `/` alone as the path separator. Good enough for the one place this is
+/// used just below; not a general-purpose URI encoder.
+#[cfg(target_os = "linux")]
+fn path_to_file_uri(path: &Path) -> String {
+    let mut uri = String::from("file://");
+    for byte in path.to_string_lossy().bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                uri.push(byte as char)
+            }
+            _ => uri.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    uri
+}
+
+/// Linux has no single, universally-supported "reveal and select this item"
+/// API the way Windows/macOS do. Tries the `org.freedesktop.FileManager1`
+/// D-Bus interface first — implemented by Nautilus, Nemo, and several other
+/// file managers, and the same mechanism VS Code itself uses here — to
+/// select `path` inside its parent folder. If that isn't available (no
+/// `dbus-send` binary, nothing listening on the other end, a sandboxed
+/// environment, ...), falls back to just opening the containing folder with
+/// `xdg-open`, which is close to universal but can't highlight the specific
+/// item within it.
+#[cfg(target_os = "linux")]
+fn reveal_on_linux(path: &Path) -> Result<(), FsError> {
+    let uri = path_to_file_uri(path);
+    let dbus_ok = std::process::Command::new("dbus-send")
+        .args([
+            "--session",
+            "--dest=org.freedesktop.FileManager1",
+            "--type=method_call",
+            "/org/freedesktop/FileManager1",
+            "org.freedesktop.FileManager1.ShowItems",
+            &format!("array:string:{uri}"),
+            "string:",
+        ])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+
+    if dbus_ok {
+        return Ok(());
+    }
+
+    let parent = path.parent().unwrap_or(path);
+    std::process::Command::new("xdg-open").arg(parent).spawn()?;
+    Ok(())
 }

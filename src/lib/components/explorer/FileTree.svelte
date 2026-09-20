@@ -6,8 +6,12 @@
     import type { CopyProgress } from "$lib/types/fs";
     import type { MenuItem } from "$lib/types/menu";
     import { workspace } from "$lib/stores/workspace.svelte";
+    import { terminalStore } from "$lib/stores/terminal.svelte";
+    import { toastStore } from "$lib/stores/toast.svelte";
     import { dnd } from "$lib/stores/dnd.svelte";
     import { baseName, parentOf } from "$lib/utils/path";
+    import { describeFsError } from "$lib/utils/fsError";
+    import { revealInFileManager } from "$lib/api/fs";
     import { TREE_ACTIONS_KEY, type TreeActions } from "./context";
     import FileTreeNode from "./FileTreeNode.svelte";
     import NewEntryRow from "./NewEntryRow.svelte";
@@ -32,6 +36,11 @@
             items.push(
                 { label: "New File", action: () => workspace.startCreate(entry.path, false) },
                 { label: "New Folder", action: () => workspace.startCreate(entry.path, true) },
+                {
+                    label: "Open in Integrated Terminal",
+                    action: () => terminalStore.openInNewTerminal(entry.path),
+                    separatorAbove: true,
+                },
             );
         }
         items.push(
@@ -52,8 +61,26 @@
                 separatorAbove: true,
             },
             { label: "Delete", action: () => workspace.deleteSelected(), danger: true },
+            {
+                label: "Reveal in File Explorer",
+                action: () => revealEntry(entry),
+                separatorAbove: true,
+            },
         );
         return items;
+    }
+
+    /** Opens the OS file manager with `entry` selected — works the same for
+     *  a file or a folder (see `reveal_in_file_manager` in fs.rs). Errors
+     *  here are real, if rare (no supported file manager found on a Linux
+     *  desktop, say), so they're worth a toast rather than being silently
+     *  swallowed the way a stale-directory race elsewhere in this file is. */
+    async function revealEntry(entry: FsEntry): Promise<void> {
+        try {
+            await revealInFileManager(entry.path);
+        } catch (err) {
+            toastStore.error(describeFsError(err));
+        }
     }
 
     // --- in-tree drag (pointer-based — see stores/dnd.svelte.ts for why) -----
@@ -121,15 +148,10 @@
     });
 
     onMount(() => {
-        let unlistenChanged: (() => void) | undefined;
         let unlistenProgress: (() => void) | undefined;
         let unlistenDragDrop: (() => void) | undefined;
 
         (async () => {
-            unlistenChanged = await listen<string[]>("fs:changed", (event) => {
-                for (const dir of event.payload) workspace.refresh(dir);
-            });
-
             unlistenProgress = await listen<CopyProgress>("fs:copy-progress", (event) => {
                 workspace.copyProgress = event.payload;
                 if (event.payload.done >= event.payload.total) {
@@ -160,7 +182,6 @@
         })();
 
         return () => {
-            unlistenChanged?.();
             unlistenProgress?.();
             unlistenDragDrop?.();
         };

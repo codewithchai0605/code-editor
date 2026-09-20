@@ -34,6 +34,7 @@
 //!   files after a (re)start, per AGENT.md §5.5/§9, without the frontend
 //!   needing to know or care that a restart happened.
 
+use crate::lsp::installer;
 use crate::lsp::project_scanner;
 use crate::lsp::protocol::{read_message, write_message};
 use crate::lsp::registry::{self, ServerConfig};
@@ -41,8 +42,9 @@ use lsp_types::{
     ClientCapabilities, CodeActionContext, CodeActionParams, CompletionParams, Diagnostic,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DocumentFormattingParams, DocumentSymbolParams, ExecuteCommandParams, FormattingOptions,
-    GotoDefinitionParams, HoverParams, InitializeParams, InitializedParams, PartialResultParams,
-    Position, Range, ReferenceContext, ReferenceParams, RenameParams, SignatureHelpParams,
+    GotoDefinitionParams, HoverClientCapabilities, HoverParams, InitializeParams,
+    InitializedParams, MarkupKind, PartialResultParams, Position, Range, ReferenceContext,
+    ReferenceParams, RenameParams, SignatureHelpParams, TextDocumentClientCapabilities,
     TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
     TextDocumentPositionParams, Uri, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
     WorkspaceFolder, WorkspaceSymbolParams,
@@ -61,6 +63,12 @@ use tokio::sync::{oneshot, watch, Mutex as AsyncMutex};
 use tokio::task::JoinSet;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long `stop()` will wait for an in-flight `initialize` to settle
+/// (into `Running` or `Crashed`) before giving up and sending `shutdown`
+/// anyway — bounded slightly above `REQUEST_TIMEOUT` so this is normally
+/// resolved by `initialize` finishing (or timing out) on its own, not by
+/// this timeout firing first.
+const INITIALIZE_GRACE: Duration = Duration::from_secs(20);
 /// How long `stop()` waits for a `shutdown` response before giving up and
 /// sending `exit` anyway — a server that doesn't answer `shutdown`
 /// shouldn't be able to block the user from stopping it.
@@ -86,10 +94,41 @@ const AUTO_RESTART_BACKOFFS: [Duration; 5] = [
     Duration::from_secs(16),
 ];
 
-/// Resolves a command name (e.g. "typescript-language-server") to its real
-/// executable path via `PATH`, correctly handling Windows.
+/// This client's declared `ClientCapabilities` — deliberately minimal
+/// (mostly `None`/default) rather than an attempt to advertise everything
+/// this integration *sort of* handles: over-claiming a capability this
+/// client doesn't actually honor (e.g. `workspace.configuration`, which
+/// would commit to answering `workspace/configuration` requests — see
+/// `route_message`'s doc comment on why server-to-client requests are
+/// still intentionally dropped) tends to make servers behave *worse*,
+/// not better, by relying on a round-trip that never comes.
 ///
-/// **This is the fix for "program not found" even when the tool is
+/// The one addition over an empty `ClientCapabilities::default()`:
+/// `hover.content_format`, telling the server this client can render
+/// Markdown (preferring it over plain text) — a capability with no
+/// reciprocal obligation, and one that directly improves what
+/// `lsp/hover.ts`'s syntax-highlighted renderer has to work with.
+fn client_capabilities() -> ClientCapabilities {
+    ClientCapabilities {
+        text_document: Some(TextDocumentClientCapabilities {
+            hover: Some(HoverClientCapabilities {
+                dynamic_registration: None,
+                content_format: Some(vec![MarkupKind::Markdown, MarkupKind::PlainText]),
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+/// Resolves a command name (e.g. "typescript-language-server") to the
+/// real executable to run — checked in order: (1) whether this app
+/// previously auto-installed it (`installer::installed_binary_path`,
+/// which always wins when present, so an app-managed install can never
+/// be shadowed by something stale on PATH), (2) PATH via `which`,
+/// correctly handling Windows.
+///
+/// **(2) is the fix for "program not found" even when the tool is
 /// installed and on PATH.** `Command::new("foo")` calls `CreateProcessW`
 /// directly on Windows, which does *not* consult the `PATHEXT` environment
 /// variable — so it only ever finds `foo.exe`/`foo.com`, never
@@ -100,16 +139,20 @@ const AUTO_RESTART_BACKOFFS: [Duration; 5] = [
 /// from Rust. The `which` crate performs the same PATH × PATHEXT search a
 /// shell would.
 ///
-/// Falls back to the bare name if resolution fails, so the *original*,
-/// more actionable "not installed?" error still surfaces from the actual
-/// spawn attempt below, rather than a different error from here.
+/// Falls back to the bare name if both resolution steps fail, so the
+/// *original*, more actionable "not installed?" error still surfaces
+/// from the actual spawn attempt below, rather than a different error
+/// from here.
 ///
 /// Security note: the registry's `command`/`args` come from a
 /// user-editable, project-local config file (`.codeeditor/lsp-servers.json`)
 /// — trusted-but-reviewable input, the same trust level as any other
 /// project-local config file that can run commands (compare a repo's
 /// `package.json` scripts or `.vscode/tasks.json`).
-fn resolve_program(name: &str) -> String {
+fn resolve_program(app: &AppHandle, language_id: &str, name: &str) -> String {
+    if let Some(installed) = crate::lsp::installer::installed_binary_path(app, language_id, name) {
+        return installed.to_string_lossy().into_owned();
+    }
     which::which(name)
         .ok()
         .and_then(|p| p.to_str().map(str::to_owned))
@@ -131,7 +174,17 @@ pub struct ServerKey {
 pub enum ServerStatus {
     Starting,
     Running,
-    Crashed { message: String },
+    /// `installable` is `true` when this crash looks like "the command
+    /// isn't installed" (an OS-level "not found" spawn failure) *and*
+    /// the resolved config has a strategy `installer.rs` can actually run
+    /// — the status bar's cue to offer an "Install" button instead of
+    /// just "Restart". A crash for any other reason (the binary exists
+    /// but exited, a bad argument, ...) leaves this `false`; restarting
+    /// is the right next step for those, not reinstalling.
+    Crashed {
+        message: String,
+        installable: bool,
+    },
     Stopped,
 }
 
@@ -265,12 +318,16 @@ struct StatusEvent {
     status: ServerStatus,
 }
 
+/// Also reused directly by `installer.rs` to stream install progress into
+/// the same event (and therefore the same "LSP Output" panel a user might
+/// already have open for this server) rather than inventing a second,
+/// install-specific log event.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct LogEvent {
-    root: String,
-    language_id: String,
-    line: String,
+pub(crate) struct LogEvent {
+    pub(crate) root: String,
+    pub(crate) language_id: String,
+    pub(crate) line: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -322,6 +379,16 @@ pub struct LspManager {
     /// manual restart.
     restart_attempts: StdMutex<HashMap<ServerKey, u32>>,
     open_docs: AsyncMutex<HashMap<ServerKey, HashMap<String, OpenDoc>>>,
+    /// Servers whose process never even started — a "command not
+    /// found"-class spawn failure, kept separately from `servers` (whose
+    /// entries always wrap a real, at-least-once-live `Child`) rather
+    /// than trying to make `LspServerInstance` itself model a process
+    /// that was never actually spawned. Without this, a language whose
+    /// server was never installed would have *nothing* for `list_servers`
+    /// to report — no row for the status bar's "Install" button to
+    /// attach to at all, which defeats the point of it. Cleared for a key
+    /// the moment that key's server successfully spawns.
+    never_spawned: StdMutex<HashMap<ServerKey, (String, bool)>>,
 }
 
 impl LspManager {
@@ -337,7 +404,7 @@ impl LspManager {
         workspace_root: PathBuf,
     ) -> Box<[ProjectRootInfo]> {
         self.set_workspace(app, workspace_root.clone()).await;
-        let registry = registry::load_registry(&workspace_root);
+        let registry = registry::load_registry(app, &workspace_root);
         project_scanner::scan_workspace(&workspace_root, &registry.servers)
             .into_iter()
             .map(|r| ProjectRootInfo {
@@ -349,7 +416,7 @@ impl LspManager {
 
     async fn set_workspace(&self, app: &AppHandle, root: PathBuf) {
         let previous = self.workspace_root.lock().unwrap().clone();
-        if previous.as_ref() == Some(&root) {
+        if previous.as_ref().is_some_and(|p| paths_equal(p, &root)) {
             return; // re-detecting the same workspace — leave running servers alone
         }
         *self.workspace_root.lock().unwrap() = Some(root);
@@ -359,6 +426,7 @@ impl LspManager {
         }
         self.restart_attempts.lock().unwrap().clear();
         self.open_docs.lock().await.clear();
+        self.never_spawned.lock().unwrap().clear();
     }
 
     /// Starts (or, if already `Starting`/`Running`, reuses) the server for
@@ -396,17 +464,16 @@ impl LspManager {
             .unwrap()
             .clone()
             .unwrap_or_else(|| root.clone());
-        let Some(config) = registry::resolve_server_config(&workspace_root, &language_id, &root)
+        let Some(config) =
+            registry::resolve_server_config(&app, &workspace_root, &language_id, &root)
         else {
-            let message = format!(
-                "No LSP server configured for '{language_id}'. Add an entry to {}/.codeeditor/lsp-servers.json",
-                workspace_root.display()
-            );
+            let message = format!("No LSP server configured for '{language_id}'. Add one from the status bar's server list, or Settings.");
             emit_status(
                 &app,
                 &key,
                 ServerStatus::Crashed {
                     message: message.clone(),
+                    installable: false,
                 },
             );
             return Err(message);
@@ -425,7 +492,7 @@ impl LspManager {
         config: ServerConfig,
         root: &Path,
     ) -> Result<(), String> {
-        let program = resolve_program(&config.command);
+        let program = resolve_program(app, &key.language_id, &config.command);
         let mut cmd = Command::new(&program);
         cmd.args(&config.args);
         cmd.current_dir(root);
@@ -435,6 +502,7 @@ impl LspManager {
 
         #[cfg(windows)]
         {
+            use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
@@ -442,21 +510,36 @@ impl LspManager {
         let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(e) => {
-                let message = format!(
-                    "Failed to launch {} language server (resolved '{}' to '{program}'): {e}. \
-                     Is it installed and on PATH?",
-                    key.language_id, config.command
-                );
+                let not_found = e.kind() == std::io::ErrorKind::NotFound;
+                let installable = not_found && crate::lsp::installer::is_auto_installable(&config);
+                let message = if installable {
+                    format!("'{}' isn't installed yet.", config.command)
+                } else {
+                    format!(
+                        "Failed to launch {} language server (resolved '{}' to '{program}'): {e}. \
+                         Is it installed and on PATH?",
+                        key.language_id, config.command
+                    )
+                };
+                self.never_spawned
+                    .lock()
+                    .unwrap()
+                    .insert(key.clone(), (message.clone(), installable));
                 emit_status(
                     app,
                     &key,
                     ServerStatus::Crashed {
                         message: message.clone(),
+                        installable,
                     },
                 );
                 return Err(message);
             }
         };
+        // Spawned successfully -- clear any earlier "never even started"
+        // record for this key, since `servers` (updated just below) is
+        // now the authoritative entry for it.
+        self.never_spawned.lock().unwrap().remove(&key);
 
         let stdout = child
             .stdout
@@ -572,7 +655,7 @@ impl LspManager {
                 uri: root_uri,
                 name: "workspace".to_string(),
             }]),
-            capabilities: ClientCapabilities::default(),
+            capabilities: client_capabilities(),
             initialization_options: config.initialization_options.clone(),
             ..Default::default()
         };
@@ -639,10 +722,30 @@ impl LspManager {
         key: &ServerKey,
         message: String,
     ) {
+        // Always `installable: false` here — this path only runs for a
+        // server that was found and running, then exited unexpectedly
+        // (an actual crash), never for "the command doesn't exist" (that
+        // fails earlier, inside `spawn_instance`'s `cmd.spawn()` match,
+        // before a reader task — and therefore this function — is ever
+        // reachable at all).
         if let Some(instance) = self.servers.lock().await.get(key).cloned() {
-            instance.set_status(app, key, ServerStatus::Crashed { message });
+            instance.set_status(
+                app,
+                key,
+                ServerStatus::Crashed {
+                    message,
+                    installable: false,
+                },
+            );
         } else {
-            emit_status(app, key, ServerStatus::Crashed { message });
+            emit_status(
+                app,
+                key,
+                ServerStatus::Crashed {
+                    message,
+                    installable: false,
+                },
+            );
         }
         self.schedule_auto_restart(app.clone(), key.clone());
     }
@@ -816,6 +919,36 @@ impl LspManager {
             return Ok(());
         }
 
+        if matches!(*instance.status.borrow(), ServerStatus::Starting) {
+            // Never send `shutdown` while `initialize` is still in flight.
+            // The spec is explicit that a client must not send additional
+            // requests before `initialize` has been answered, and several
+            // real servers enforce this strictly rather than just being
+            // lenient about it — TypeScript's native `tsc --lsp --stdio`
+            // among them, which rejects an early `shutdown` with a
+            // `ServerNotInitialized` error, making the server look like it
+            // never started at all rather than like a client bug. Wait
+            // (bounded) for the status to leave `Starting` — either
+            // `Running` (safe to shut down normally) or `Crashed` (it
+            // failed on its own; nothing left to gracefully shut down).
+            let mut receiver = instance.status.subscribe();
+            let _ = tokio::time::timeout(INITIALIZE_GRACE, async {
+                while matches!(*receiver.borrow(), ServerStatus::Starting) {
+                    if receiver.changed().await.is_err() {
+                        break;
+                    }
+                }
+            })
+            .await;
+        }
+
+        if matches!(
+            *instance.status.borrow(),
+            ServerStatus::Stopped | ServerStatus::Crashed { .. }
+        ) {
+            return Ok(()); // settled (usually: crashed) on its own while waiting above
+        }
+
         instance.stopping.store(true, Ordering::SeqCst);
         // Optimistic immediate UI feedback — the stdout-reader task
         // re-confirms this once the process has actually exited, which is
@@ -879,6 +1012,33 @@ impl LspManager {
         self.start(app, root, language_id).await
     }
 
+    /// Runs the configured auto-install for `language_id` at `root` (see
+    /// `installer.rs`), then starts it — what the status bar's "Install"
+    /// button calls, since a successful install by itself is useless
+    /// without also launching the now-installed server. Resolves the
+    /// config fresh (same as `start` does) so this picks up whatever
+    /// variant/override is currently in effect.
+    pub async fn install_and_start(
+        &self,
+        app: AppHandle,
+        root: PathBuf,
+        language_id: String,
+    ) -> Result<(), String> {
+        let workspace_root = self
+            .workspace_root
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| root.clone());
+        let Some(config) =
+            registry::resolve_server_config(&app, &workspace_root, &language_id, &root)
+        else {
+            return Err(format!("No LSP server configured for '{language_id}'"));
+        };
+        installer::install(&app, &root, &language_id, &config).await?;
+        self.start(app, root, language_id).await
+    }
+
     /// Best-effort, synchronous, non-graceful kill of every server
     /// process — used only from the app's exit handler, where there's no
     /// async runtime context to do `stop()`'s polite `shutdown`/`exit`
@@ -905,18 +1065,36 @@ impl LspManager {
 
     /// Every server this manager currently knows about, alive or not —
     /// the source of truth for the status bar's server list.
+    /// Every server this manager currently knows about, alive or not —
+    /// the source of truth for the status bar's server list. Merges two
+    /// sources: `servers` (ever successfully spawned, whatever its
+    /// current status) and `never_spawned` (never even got that far —
+    /// see its doc comment on `LspManager`), so a language whose server
+    /// isn't installed yet still gets a row for the "Install" button.
     pub async fn list_servers(&self) -> Box<[ServerInfo]> {
-        self.servers
-            .lock()
-            .await
+        let servers = self.servers.lock().await;
+        let spawned = servers.iter().map(|(key, instance)| ServerInfo {
+            root: key.root.to_string_lossy().into_owned().into_boxed_str(),
+            language_id: key.language_id.clone().into_boxed_str(),
+            status: instance.status.borrow().clone(),
+            capabilities: instance.capabilities.lock().unwrap().clone(),
+        });
+
+        let never_spawned = self.never_spawned.lock().unwrap();
+        let unspawned = never_spawned
             .iter()
-            .map(|(key, instance)| ServerInfo {
+            .filter(|(key, _)| !servers.contains_key(key))
+            .map(|(key, (message, installable))| ServerInfo {
                 root: key.root.to_string_lossy().into_owned().into_boxed_str(),
                 language_id: key.language_id.clone().into_boxed_str(),
-                status: instance.status.borrow().clone(),
-                capabilities: instance.capabilities.lock().unwrap().clone(),
-            })
-            .collect()
+                status: ServerStatus::Crashed {
+                    message: message.clone(),
+                    installable: *installable,
+                },
+                capabilities: Value::Null,
+            });
+
+        spawned.chain(unspawned).collect()
     }
 
     pub async fn get_logs(
@@ -964,7 +1142,7 @@ impl LspManager {
             ServerStatus::Starting => Err(format!(
                 "Language server for '{language_id}' is still starting"
             )),
-            ServerStatus::Crashed { message } => Err(format!(
+            ServerStatus::Crashed { message, .. } => Err(format!(
                 "Language server for '{language_id}' crashed: {message}"
             )),
             ServerStatus::Stopped => Err(format!("Language server for '{language_id}' is stopped")),
@@ -1356,4 +1534,25 @@ fn path_to_uri(path: &Path) -> Result<Uri, String> {
 fn parse_uri(s: &str) -> Result<Uri, String> {
     s.parse::<Uri>()
         .map_err(|e| format!("Invalid URI '{s}': {e}"))
+}
+
+/// Windows paths are case-insensitive at the filesystem level, but
+/// `PathBuf`'s `Eq` is a plain component-string comparison that doesn't
+/// know that — so the *same* workspace, reported with different letter
+/// casing by two different callers (a very real possibility: file
+/// dialogs, drag-and-drop, and a path built up from other strings don't
+/// all reliably agree on casing), would otherwise look like a *different*
+/// workspace to `set_workspace`. That falsely triggered a full
+/// `stop_all()` — including on a server whose `initialize` was still in
+/// flight, which is what caused the `ServerNotInitialized` errors some
+/// servers correctly reject that with (see `stop`'s own comment on that).
+fn paths_equal(a: &Path, b: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        a == b
+    }
 }

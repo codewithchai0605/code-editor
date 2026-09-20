@@ -20,6 +20,19 @@ class TerminalStore {
         this.activeId = id;
     }
 
+    /** Used by the file tree's "Open in Integrated Terminal" — creates a new
+     *  session rooted at `cwd` and makes sure the panel is actually visible.
+     *  Deliberately awaits `createSession` *before* opening the panel,
+     *  rather than the other way round: Panel.svelte's own effect creates a
+     *  first session automatically the moment the panel opens if none exist
+     *  yet, so flipping `panelOpen` first could race it into spawning an
+     *  extra, unwanted terminal at the workspace root before this one's
+     *  session has been pushed. */
+    async openInNewTerminal(cwd: string): Promise<void> {
+        await this.createSession(cwd);
+        layout.panelOpen = true;
+    }
+
     setActive(id: string): void {
         if (this.sessions.some((s) => s.id === id)) this.activeId = id;
     }
@@ -40,7 +53,7 @@ class TerminalStore {
         try {
             // Fire and forget: if the backend already killed it (e.g., via crash/exit),
             // we don't want to block the UI or spam the console.
-            closeTerminal(id).catch(() => {});
+            closeTerminal(id).catch(() => { });
         } catch (err) {
             console.error("Failed to close terminal session:", err);
         }

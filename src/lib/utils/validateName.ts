@@ -45,3 +45,25 @@ export function validateEntryName(name: string): string | null {
     if (WINDOWS_RESERVED.has(base)) return `"${base}" is a reserved name on Windows.`;
     return null;
 }
+
+/** Same rules as `validateEntryName`, applied to each `/`- or
+ *  `\`-separated segment of `name` instead of to the whole string. Used by
+ *  "New File"/"New Folder" (see NewEntryRow.svelte), which — unlike rename
+ *  — is allowed to accept a nested path like `"lib/date.ts"` and have
+ *  `create_entry` (fs.rs) create whatever intermediate folders don't exist
+ *  yet. Mirrors `split_relative_segments` in fs.rs: empty/repeated/leading/
+ *  trailing separators collapse away rather than erroring, so `"/lib/"`,
+ *  `"lib//date.ts"`, etc. all just work. */
+export function validateEntryPath(name: string): string | null {
+    const segments = name
+        .trim()
+        .split(/[/\\]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    if (segments.length === 0) return "Name can't be empty.";
+    for (const segment of segments) {
+        const error = validateEntryName(segment);
+        if (error) return error;
+    }
+    return null;
+}

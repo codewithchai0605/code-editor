@@ -12,7 +12,9 @@ const files = [
     "./vite.config.js", // file
     "./svelte.config.js", // file
     "./tsconfig.json", // file
-    "./CLAUDE.md", // file
+    "./src-tauri/info.plist",
+    "./src-tauri/windows/hooks.nsh",
+    "./src-tauri/tauri.conf.json"
 ];
 
 const zip = new JSZip();

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the generated Info.plist when tauri-bundler builds the macOS
+  .app bundle. If src-tauri already has its own Info.plist, merge just the
+  CFBundleDocumentTypes key below into it rather than replacing the file —
+  this one contains nothing else.
+
+  This is what makes Finder offer this app under a folder's right-click
+  "Open With" submenu. There's no separate registration step or command
+  needed on macOS: it's this declaration, baked into the .app bundle at
+  build time, and nothing else — see native_integration.rs's doc comment
+  for why `context_menu_status` reports macOS as non-toggleable.
+
+  LSHandlerRank is deliberately "Alternate", not "Default" or "Owner": this
+  makes the app an *option* in Finder's "Open With" menu for a folder
+  without becoming the thing a plain double-click on every folder opens.
+  "Default"/"Owner" here would hijack normal Finder navigation completely.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Folder</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.folder</string>
+            </array>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+        </dict>
+    </array>
+</dict>
+</plist>

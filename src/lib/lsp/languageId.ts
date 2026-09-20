@@ -2,7 +2,8 @@ import { extensionOf } from "$lib/utils/fileIcons";
 
 /**
  * Maps a file extension to the language ID used both as the registry key
- * in `.codeeditor/lsp-servers.json` and in the LSP `textDocument/didOpen`
+ * (this app's own LSP config, managed from Settings — see
+ * `src-tauri/src/lsp/registry.rs`) and in the LSP `textDocument/didOpen`
  * notification. `null` means "no LSP integration for this file" — a
  * normal, expected state (most extensions won't have a server configured),
  * not an error. Extend this alongside the registry's default entries in

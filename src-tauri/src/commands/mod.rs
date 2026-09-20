@@ -9,7 +9,8 @@
 pub mod app;
 pub mod fs;
 pub mod git;
+pub mod lsp;
+pub mod native_integration;
 pub mod process_monitor;
 pub mod pty;
-pub mod lsp;
 pub mod search;

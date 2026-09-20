@@ -1,7 +1,9 @@
 import { EditorSelection, EditorState, Text, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
+import { listen } from "@tauri-apps/api/event";
 import { readTextFile, writeTextFile, readBinaryPreview } from "$lib/api/fs";
-import { isFsError } from "$lib/types/fs";
+import { isFsError, type FsChangedPayload } from "$lib/types/fs";
+import { describeFsError } from "$lib/utils/fsError";
 import { guessFileKind, type FileKind } from "$lib/editor/fileKind";
 import { loadLanguage } from "$lib/editor/languages";
 import { baseExtensions, themeCompartment } from "$lib/editor/setup";
@@ -35,6 +37,12 @@ export interface OpenTab {
      *  meaningful when this file has a recognized LSP language (see
      *  lsp/languageId.ts); otherwise unused. */
     lspVersion?: number;
+    /** True when the fs watcher reported a change to this file while it had
+     *  unsaved edits, so the reload that normally happens automatically
+     *  (see `handleExternalChange`) was held back rather than clobbering
+     *  them. Cleared on save (the buffer becomes the source of truth again)
+     *  or as soon as a reload does go through. */
+    changedOnDisk?: boolean;
 }
 
 /** A cursor/selection position to jump to once `path` is open and its
@@ -51,11 +59,6 @@ export interface RevealTarget {
     colEnd: number;
 }
 
-function describeError(err: unknown): string {
-    if (isFsError(err)) return err.message ?? "Something went wrong.";
-    return err instanceof Error ? err.message : String(err);
-}
-
 /** `Text.of` splits on `\n` only, which would leave a stray `\r` at the
  *  end of every line of a CRLF file's baseline — harmless for the diff
  *  itself (both sides would carry it), but this normalizes so a
@@ -63,6 +66,44 @@ function describeError(err: unknown): string {
  *  a "changed" line out of nothing but a line-ending difference. */
 function textFromString(value: string): Text {
     return Text.of(value.length ? value.split(/\r\n|\r|\n/) : [""]);
+}
+
+/** Common-prefix/common-suffix diff between two full-file texts, reduced to
+ *  a single `{from, to, insert}` change — `null` if identical. Used by
+ *  `reloadFromDisk` to bring a tab back in sync with an externally-changed
+ *  file as one minimal edit rather than replacing the whole document: for
+ *  the common case (another tool added, removed, or edited a line
+ *  elsewhere in the file — e.g. `npm install` rewriting a dependency
+ *  version in `package.json`) this keeps the cursor, scroll position, and
+ *  undo history intact instead of resetting them on every external change.
+ *  Not a real diff — a full-file rewrite (a formatter reflowing
+ *  everything) degenerates to "replace everything", same as it would
+ *  without this — but it's O(n) and handles the localized-edit case, which
+ *  is the overwhelming majority of "something external touched this file"
+ *  in practice. */
+function minimalChange(
+    oldText: string,
+    newText: string,
+): { from: number; to: number; insert: string } | null {
+    if (oldText === newText) return null;
+    const maxPrefix = Math.min(oldText.length, newText.length);
+    let start = 0;
+    while (start < maxPrefix && oldText.charCodeAt(start) === newText.charCodeAt(start)) {
+        start++;
+    }
+
+    let oldEnd = oldText.length;
+    let newEnd = newText.length;
+    while (
+        oldEnd > start &&
+        newEnd > start &&
+        oldText.charCodeAt(oldEnd - 1) === newText.charCodeAt(newEnd - 1)
+    ) {
+        oldEnd--;
+        newEnd--;
+    }
+
+    return { from: start, to: oldEnd, insert: newText.slice(start, newEnd) };
 }
 
 class EditorStore {
@@ -86,6 +127,8 @@ class EditorStore {
      *  text tab is mounted. Only needed so a theme change can be pushed into
      *  the currently-visible editor immediately — see applyThemeToOpenTabs. */
     private activeView: EditorView | null = null;
+
+    private fsListenerStarted = false;
 
     constructor() {
         // Keeps every open file's dirty-diff gutter pointed at the right
@@ -116,6 +159,92 @@ class EditorStore {
 
     private findTab(path: string): OpenTab | undefined {
         return this.tabs.find((t) => t.path === path);
+    }
+
+    /** Wires up the backend's `fs:changed` event (see fs.rs's
+     *  `start_watcher`) to reload any open tab whose exact file was
+     *  touched — another editor, an external agent, `npm install`
+     *  rewriting `package-lock.json`, a git checkout, anything that isn't
+     *  this app's own `save()`. Previously nothing did this at all: an
+     *  externally-changed file only ever showed up once its tab was closed
+     *  and reopened. `workspace` listens for the same event independently
+     *  (see its own `initFsWatcherListener`) to refresh directory listings
+     *  — kept as two separate listeners rather than one calling into the
+     *  other so `editor.svelte.ts` and `workspace.svelte.ts` don't end up
+     *  importing each other. Call once, e.g. from Shell.svelte's onMount. */
+    initFsWatcherListener(): void {
+        if (this.fsListenerStarted) return;
+        this.fsListenerStarted = true;
+        listen<FsChangedPayload>("fs:changed", (event) => {
+            this.handleExternalChange(event.payload.paths);
+        });
+    }
+
+    /** Matches every path the watcher reported against open tabs and
+     *  reloads the ones that are text and *not* dirty. A dirty tab is left
+     *  alone and flagged instead (`changedOnDisk`) — silently discarding
+     *  someone's in-progress edit because a build script happened to touch
+     *  the same file would be far worse than a stale buffer; they still
+     *  get to see the file changed underneath them and decide what to do
+     *  about it (the alternative here would be a merge UI, which is a lot
+     *  of machinery for a case that in practice is rare — most external
+     *  changes land on files nobody's mid-edit in). */
+    private handleExternalChange(paths: string[]): void {
+        if (paths.length === 0) return;
+        const changed = new Set(paths);
+        for (const tab of this.tabs) {
+            if (tab.kind !== "text" || !changed.has(tab.path)) continue;
+            if (tab.isDirty) {
+                tab.changedOnDisk = true;
+                continue;
+            }
+            void this.reloadFromDisk(tab.path);
+        }
+    }
+
+    /** Reloads `path`'s buffer from disk. Only ever called for a *clean*
+     *  tab — see `handleExternalChange`, the sole caller — so overwriting
+     *  the buffer here never discards anything the user hasn't already
+     *  saved. Applies the reload through `suppressDirtyTracking` (the same
+     *  mechanism `applyThemeToOpenTabs` uses) so the updateListener's
+     *  `markDirty` doesn't immediately re-flag a tab that, by construction,
+     *  now exactly matches what's on disk — then notifies the LSP directly
+     *  afterwards, since that half is still very much wanted (the server's
+     *  view of the file needs to track reality regardless of who changed
+     *  it, not just the user typing in this editor). */
+    private async reloadFromDisk(path: string): Promise<void> {
+        const tab = this.findTab(path);
+        if (!tab || tab.kind !== "text" || !tab.cmState) return;
+
+        let content: string;
+        try {
+            content = await readTextFile(path);
+        } catch {
+            // Gone, became unreadable, or turned into something too
+            // large/binary in the same beat the watcher fired — leave the
+            // buffer as last known-good rather than erroring over a
+            // transient race (e.g. a save-as elsewhere that
+            // deletes-then-recreates the file).
+            return;
+        }
+
+        const oldText = tab.cmState.doc.toString();
+        const change = minimalChange(oldText, content);
+        tab.changedOnDisk = false;
+        if (!change) return; // watcher fired but the content on disk hasn't actually changed
+
+        this.suppressDirtyTracking = true;
+        try {
+            if (path === this.activePath && this.activeView) {
+                this.activeView.dispatch({ changes: change });
+            } else {
+                tab.cmState = tab.cmState.update({ changes: change }).state;
+            }
+        } finally {
+            this.suppressDirtyTracking = false;
+        }
+        tab.isDirty = false;
+        this.scheduleLspChange(path);
     }
 
     async open(path: string): Promise<void> {
@@ -168,7 +297,7 @@ class EditorStore {
             if (isFsError(err) && err.kind === "unsupported") {
                 await this.loadAsBinary(path);
             } else {
-                this.updateTab(path, { loading: false, error: describeError(err) });
+                this.updateTab(path, { loading: false, error: describeFsError(err) });
             }
         }
     }
@@ -246,7 +375,7 @@ class EditorStore {
             const bytes = new Uint8Array(await readBinaryPreview(path));
             this.updateTab(path, { binaryBytes: bytes, loading: false });
         } catch (err) {
-            this.updateTab(path, { loading: false, error: describeError(err) });
+            this.updateTab(path, { loading: false, error: describeFsError(err) });
         }
     }
 
@@ -473,8 +602,9 @@ class EditorStore {
         try {
             await writeTextFile(tab.path, tab.cmState.doc.toString());
             tab.isDirty = false;
+            tab.changedOnDisk = false;
         } catch (err) {
-            tab.error = describeError(err);
+            tab.error = describeFsError(err);
         }
     }
 

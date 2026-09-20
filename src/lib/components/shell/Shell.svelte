@@ -25,6 +25,8 @@
 
         const unregisterCommands = registerCoreCommands();
         workspace.initFsWatcherListener();
+        workspace.initOpenFolderListener();
+        editorStore.initFsWatcherListener();
         workspaceSearchStore.initListeners();
 
         const updateSize = () => layout.setWindowSize(window.innerWidth, window.innerHeight);

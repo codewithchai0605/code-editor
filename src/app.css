@@ -24,6 +24,27 @@
     --color-accent: #007acc;
     --color-focus-ring: #007fd4;
 
+    /* Syntax highlighting — mirrors the active CodeMirror theme's own
+   * palette (see editor/themeEngine.ts's `applyAppColors`, which keeps
+   * these in sync on every theme switch) so that anything rendering code
+   * *outside* a live CodeMirror instance — LSP hover/signature-help
+   * content (lsp/markdown.ts) and the Markdown preview's fenced code
+   * blocks — gets the same colors as the editor itself, via the same
+   * `.hljs-*` class names highlight.js already generates. */
+    --color-syntax-comment: #6a9955;
+    --color-syntax-keyword: #569cd6;
+    --color-syntax-control-keyword: #c586c0;
+    --color-syntax-variable: #9cdcfe;
+    --color-syntax-function: #dcdcaa;
+    --color-syntax-type: #4ec9b0;
+    --color-syntax-number: #b5cea8;
+    --color-syntax-string: #ce9178;
+    --color-syntax-regexp: #d16969;
+    --color-syntax-operator: #d4d4d4;
+    --color-syntax-tag: #569cd6;
+    --color-syntax-attribute: #9cdcfe;
+    --color-syntax-invalid: #f44747;
+
     /* Typography */
     --font-ui: -apple-system, "Segoe UI", system-ui, Ubuntu, sans-serif;
     --font-mono: "Cascadia Code", Consolas, "SFMono-Regular", Menlo, monospace;
@@ -111,32 +132,82 @@ body.dragging-tree-item * {
     cursor: grabbing !important;
 }
 
-.cm-foldGutter {
-    width: 18px;
+/* highlight.js token colors, for any fenced code block rendered outside a
+ * live CodeMirror instance (see `lsp/markdown.ts` — LSP hover/signature-
+ * help content — and the Markdown preview, `markdown/render.ts`) —
+ * driven by the same `--color-syntax-*` tokens `applyAppColors` keeps in
+ * sync with the active CodeMirror theme, so these match the editor's own
+ * colors regardless of which theme is active. */
+.hljs-comment,
+.hljs-quote {
+    color: var(--color-syntax-comment);
+    font-style: italic;
 }
 
-.cm-foldGutter .cm-gutterElement {
-    padding: 0;
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-built_in {
+    color: var(--color-syntax-keyword);
 }
 
-.fold-marker {
-    width: 18px;
-    height: 100%;
-
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    opacity: 0.75;
-    cursor: pointer;
-
-    transition: opacity 100ms ease;
+.hljs-string,
+.hljs-doctag,
+.hljs-addition {
+    color: var(--color-syntax-string);
 }
 
-.cm-foldGutter .cm-gutterElement:hover .fold-marker {
-    opacity: 0.75;
+.hljs-number {
+    color: var(--color-syntax-number);
 }
 
-.fold-marker:hover {
-    opacity: 1 !important;
+.hljs-regexp {
+    color: var(--color-syntax-regexp);
+}
+
+.hljs-title,
+.hljs-title.function_,
+.hljs-section {
+    color: var(--color-syntax-function);
+}
+
+.hljs-type,
+.hljs-class .hljs-title,
+.hljs-title.class_ {
+    color: var(--color-syntax-type);
+}
+
+.hljs-variable,
+.hljs-template-variable,
+.hljs-attr,
+.hljs-attribute,
+.hljs-params {
+    color: var(--color-syntax-variable);
+}
+
+.hljs-tag,
+.hljs-name {
+    color: var(--color-syntax-tag);
+}
+
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link {
+    color: var(--color-syntax-attribute);
+}
+
+.hljs-meta {
+    color: var(--color-syntax-control-keyword);
+}
+
+.hljs-deletion {
+    color: var(--color-syntax-invalid);
+}
+
+.hljs-emphasis {
+    font-style: italic;
+}
+
+.hljs-strong {
+    font-weight: bold;
 }

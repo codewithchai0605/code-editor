@@ -3,6 +3,7 @@ import { forceLinting } from "@codemirror/lint";
 import {
     lspDetectRoots,
     lspGetLogs,
+    lspInstall,
     lspListServers,
     lspListVariants,
     lspRestart,
@@ -27,6 +28,7 @@ import type {
 interface StatusEntry {
     status: LspServerStatusKind;
     error: string | null;
+    installable: boolean;
     capabilities: Record<string, unknown> | null;
 }
 
@@ -135,6 +137,20 @@ class LspStore {
         }
     }
 
+    /** Runs the configured auto-install (npm/pip/go install, or a direct
+   *  download for rust-analyzer) then starts the server — what the
+   *  status bar's "Install" button calls, shown when a server's status is
+   *  `{kind: "crashed", installable: true}`. Install progress streams
+   *  into the same `lsp:log`/Output-panel plumbing as a running server's
+   *  own output. */
+    async installServer(root: string, languageId: string): Promise<void> {
+        try {
+            await lspInstall(root, languageId);
+        } catch (err) {
+            toastStore.error(`Failed to install the ${languageId} language server: ${String(err)}`);
+        }
+    }
+
     async stopAllServers(): Promise<void> {
         try {
             await lspStopAll();
@@ -228,6 +244,7 @@ class LspStore {
                 status: server.status.kind,
                 error: server.status.message ?? null,
                 capabilities: server.capabilities,
+                installable: server.status.installable ?? false
             });
         }
         this.statuses = next;
@@ -255,6 +272,7 @@ class LspStore {
                 status: status.kind,
                 error: status.message ?? null,
                 capabilities: previous?.capabilities ?? null,
+                installable: status.installable ?? false
             });
             this.statuses = next;
 

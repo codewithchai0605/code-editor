@@ -12,6 +12,7 @@ import { workspace } from "$lib/stores/workspace.svelte";
 import { lspLanguageIdFor } from "./languageId";
 import { pathToFileUri } from "./uri";
 import { offsetToPos } from "./position";
+import { renderLspMarkdown } from "./markdown";
 
 interface MarkupContent {
     kind: string;
@@ -94,8 +95,10 @@ function buildDom(result: SignatureHelpResult): HTMLElement {
     const activeParameter = signature.activeParameter ?? result.activeParameter;
     const range = activeParamRange(signature, activeParameter);
 
+    const labelEl = document.createElement("div");
+    labelEl.className = "cm-lsp-sig-label";
     if (range) {
-        dom.append(
+        labelEl.append(
             document.createTextNode(signature.label.slice(0, range[0])),
             Object.assign(document.createElement("span"), {
                 className: "cm-lsp-sig-active-param",
@@ -104,8 +107,9 @@ function buildDom(result: SignatureHelpResult): HTMLElement {
             document.createTextNode(signature.label.slice(range[1])),
         );
     } else {
-        dom.textContent = signature.label;
+        labelEl.textContent = signature.label;
     }
+    dom.appendChild(labelEl);
 
     const activeDoc =
         activeParameter !== undefined
@@ -114,7 +118,7 @@ function buildDom(result: SignatureHelpResult): HTMLElement {
     if (activeDoc) {
         const docEl = document.createElement("div");
         docEl.className = "cm-lsp-sig-doc";
-        docEl.textContent = activeDoc;
+        renderLspMarkdown(docEl, activeDoc);
         dom.appendChild(docEl);
     }
 

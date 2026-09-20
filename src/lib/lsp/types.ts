@@ -37,6 +37,12 @@ export type LspServerStatusKind = "starting" | "running" | "crashed" | "stopped"
 export interface LspServerStatus {
     kind: LspServerStatusKind;
     message?: string;
+    /** Only meaningful when `kind === "crashed"`: `true` if this looks like
+     *  "the command isn't installed" *and* the backend knows how to
+     *  auto-install it (see `src-tauri/src/lsp/registry.rs`'s
+     *  `InstallStrategy`) — the status bar's cue to offer an "Install"
+     *  button instead of (or alongside) "Restart". */
+    installable?: boolean;
 }
 
 export interface LspStatusEvent {
@@ -70,6 +76,18 @@ export interface ServerInfo {
      *  features (rename, formatting, ...) are offered per-server without
      *  needing a typed model of every capability flag. */
     capabilities: Record<string, unknown> | null;
+}
+
+/** One row of what a Settings "Language Servers" panel lists and edits —
+ *  see `src-tauri/src/lsp/registry.rs`'s `ServerConfigInfo`. A `Multi`
+ *  language (today, just TypeScript) contributes one row per variant. */
+export interface ServerConfigInfo {
+    languageId: string;
+    variant: string | null;
+    command: string;
+    args: string[];
+    rootMarkers: string[];
+    hasInstallStrategy: boolean;
 }
 
 export interface LspTextEdit {

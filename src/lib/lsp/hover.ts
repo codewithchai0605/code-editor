@@ -6,6 +6,7 @@ import { workspace } from "$lib/stores/workspace.svelte";
 import { lspLanguageIdFor } from "./languageId";
 import { pathToFileUri } from "./uri";
 import { offsetToPos, posToOffset } from "./position";
+import { renderLspMarkdown } from "./markdown";
 import type { LspPosition, LspRange } from "./types";
 
 interface MarkupContent {
@@ -26,51 +27,6 @@ function hoverText(contents: LspHoverResult["contents"]): string {
             .join("\n\n---\n\n");
     }
     return contents.value;
-}
-
-/** Minimal, deliberately-not-a-real-markdown-renderer for hover content:
- *  fenced code blocks become `<pre><code>`, inline `` `code` `` and
- *  `**bold**` become their matching elements, everything else is plain
- *  text. Built with `createElement`/`textContent` throughout rather than
- *  any `innerHTML` — hover content comes from a language server process,
- *  and there's no reason to parse it as HTML just to render what's really
- *  just typed signatures and doc comments. */
-function renderMarkdownish(container: HTMLElement, text: string): void {
-    const withCodeBlocks = text.split(/```(?:\w*)\n?([\s\S]*?)```/g);
-    // A capturing-group split interleaves [plain, code, plain, code, ..., plain].
-    withCodeBlocks.forEach((chunk, i) => {
-        if (i % 2 === 0) {
-            if (chunk) appendInline(container, chunk);
-        } else {
-            const pre = document.createElement("pre");
-            const code = document.createElement("code");
-            code.textContent = chunk.replace(/\n$/, "");
-            pre.appendChild(code);
-            container.appendChild(pre);
-        }
-    });
-}
-
-function appendInline(container: HTMLElement, text: string): void {
-    const lines = text.split("\n");
-    lines.forEach((line, i) => {
-        if (i > 0) container.appendChild(document.createElement("br"));
-        const segments = line.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
-        for (const segment of segments) {
-            if (!segment) continue;
-            if (segment.startsWith("`") && segment.endsWith("`")) {
-                const code = document.createElement("code");
-                code.textContent = segment.slice(1, -1);
-                container.appendChild(code);
-            } else if (segment.startsWith("**") && segment.endsWith("**")) {
-                const strong = document.createElement("strong");
-                strong.textContent = segment.slice(2, -2);
-                container.appendChild(strong);
-            } else {
-                container.appendChild(document.createTextNode(segment));
-            }
-        }
-    });
 }
 
 export function lspHoverTooltip(filePath: string): Extension {
@@ -109,7 +65,10 @@ export function lspHoverTooltip(filePath: string): Extension {
                 create() {
                     const dom = document.createElement("div");
                     dom.className = "cm-lsp-hover";
-                    renderMarkdownish(dom, text);
+                    const scroll = document.createElement("div");
+                    scroll.className = "cm-lsp-hover-scroll";
+                    renderLspMarkdown(scroll, text);
+                    dom.appendChild(scroll);
                     return { dom };
                 },
             };

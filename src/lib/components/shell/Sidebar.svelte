@@ -4,6 +4,7 @@
     import TaskManager from "$lib/components/sidebar/TaskManager.svelte";
     import GitPanel from "$lib/components/sidebar/GitPanel.svelte";
     import WorkspaceSearchPanel from "$lib/components/sidebar/WorkspaceSearchPanel.svelte";
+    import LanguageServersSettings from "$lib/components/sidebar/LanguageServersSettings.svelte";
 
     const titles: Record<string, string> = {
         explorer: "Explorer",
@@ -37,8 +38,9 @@
                 Installed native extensions will be listed here once the plugin host lands.
             </p>
         {:else}
+            <LanguageServersSettings />
             <p class="placeholder">
-                A settings.json-backed settings UI is coming in a later phase.
+                More settings (a general settings.json editor) are coming in a later phase.
             </p>
         {/if}
     </div>
@@ -84,5 +86,8 @@
         color: var(--color-text-muted);
         font-size: 13px;
         line-height: 1.6;
+        margin-top: 16px;
+        padding-top: 12px;
+        border-top: 1px solid var(--color-border);
     }
 </style>

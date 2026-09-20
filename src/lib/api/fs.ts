@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { FsEntry } from "$lib/types/fs";
+import type { CreateEntryResult, FsEntry } from "$lib/types/fs";
 
 /**
  * Tauri auto-converts Rust's snake_case command parameters to camelCase for
@@ -15,8 +15,15 @@ export function readDir(path: string): Promise<FsEntry[]> {
     return invoke<FsEntry[]>("read_dir", { path });
 }
 
-export function createEntry(parentDir: string, name: string, isDir: boolean): Promise<FsEntry> {
-    return invoke<FsEntry>("create_entry", { parentDir, name, isDir });
+/** `name` may be a nested path (e.g. `"lib/date.ts"`) — see `create_entry`
+ *  in fs.rs, which creates any missing intermediate folders and reports
+ *  them back in `createdDirs`. */
+export function createEntry(
+    parentDir: string,
+    name: string,
+    isDir: boolean,
+): Promise<CreateEntryResult> {
+    return invoke<CreateEntryResult>("create_entry", { parentDir, name, isDir });
 }
 
 export function renameEntry(path: string, newName: string): Promise<FsEntry> {
@@ -60,4 +67,11 @@ export function readBinaryPreview(path: string): Promise<number[]> {
 /** Flat, gitignore-aware file index for Quick Open. */
 export function listWorkspaceFiles(root: string): Promise<string[]> {
     return invoke<string[]>("list_workspace_files", { root });
+}
+
+/** Opens the OS file manager (Explorer/Finder/whatever the Linux desktop
+ *  provides) with `path` selected — works for a file or a folder. See
+ *  `reveal_in_file_manager` in fs.rs. */
+export function revealInFileManager(path: string): Promise<void> {
+    return invoke("reveal_in_file_manager", { path });
 }

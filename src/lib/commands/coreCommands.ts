@@ -15,6 +15,7 @@ import { formatActiveDocument } from "$lib/lsp/format";
 import { lspRenameCommand } from "$lib/lsp/rename";
 import { lspCodeActionCommand } from "$lib/lsp/code-action";
 import { toastStore } from "$lib/stores/toast.svelte";
+import { registerFolderContextMenu, unregisterFolderContextMenu } from "$lib/api/nativeIntegration";
 
 /** Runs a CodeMirror command against the currently-visible editor, if
  *  there is one — the shared wrapper every editor-scoped command below
@@ -24,6 +25,23 @@ function onActiveView(run: (view: EditorView) => boolean) {
     return () => {
         if (editorStore.view) run(editorStore.view);
     };
+}
+
+/** Backing both "Preferences: Add/Remove 'Open With' to Folder Right-Click
+ *  Menu" commands below. Both `register`/`unregisterFolderContextMenu`
+ *  reject with a plain string (see native_integration.rs) rather than an
+ *  `FsError`, so the message is shown as-is — most notably on macOS, where
+ *  it always rejects explaining folder support there is set at build time,
+ *  which reads as a perfectly reasonable explanation on its own. */
+async function toggleFolderContextMenu(action: "add" | "remove"): Promise<void> {
+    try {
+        const status =
+            action === "add" ? await registerFolderContextMenu() : await unregisterFolderContextMenu();
+        const verb = action === "add" ? "Added." : "Removed.";
+        toastStore.success(`${verb} ${status.note}`);
+    } catch (err) {
+        toastStore.info(typeof err === "string" ? err : String(err));
+    }
 }
 
 /**
@@ -95,6 +113,16 @@ export function registerCoreCommands(): () => void {
             id: "workbench.selectTheme",
             title: "Preferences: Color Theme",
             run: () => paletteState.open("theme"),
+        }),
+        commandRegistry.register({
+            id: "workbench.addFolderContextMenu",
+            title: "Preferences: Add \"Open With\" to Folder Right-Click Menu",
+            run: () => void toggleFolderContextMenu("add"),
+        }),
+        commandRegistry.register({
+            id: "workbench.removeFolderContextMenu",
+            title: "Preferences: Remove \"Open With\" from Folder Right-Click Menu",
+            run: () => void toggleFolderContextMenu("remove"),
         }),
         commandRegistry.register({
             id: "editor.moveLineUp",

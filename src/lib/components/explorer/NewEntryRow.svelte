@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import { workspace } from "$lib/stores/workspace.svelte";
-    import { validateEntryName } from "$lib/utils/validateName";
+    import { validateEntryPath } from "$lib/utils/validateName";
 
     interface Props {
         depth: number;
@@ -18,7 +18,7 @@
 
     async function submit() {
         if (submitted) return;
-        const err = validateEntryName(value);
+        const err = validateEntryPath(value);
         if (err) {
             error = err;
             return;
@@ -62,7 +62,7 @@
         class="entry-input"
         bind:this={inputEl}
         bind:value
-        placeholder={isDir ? "Folder name" : "File name"}
+        placeholder={isDir ? "Folder name (e.g. nested/folder)" : "File name (e.g. lib/file.ts)"}
         onkeydown={onKeydown}
         onblur={onBlur}
     />

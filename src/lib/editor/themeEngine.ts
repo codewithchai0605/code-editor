@@ -56,43 +56,114 @@ export function buildCmTheme(theme: Theme): Extension {
             ".cm-tooltip": {
                 backgroundColor: c.bgElevated,
                 border: `1px solid ${c.border}`,
+                borderRadius: "6px",
+                boxShadow: "0 4px 16px rgba(0, 0, 0, 0.35)",
             },
             ".cm-tooltip-autocomplete ul li[aria-selected]": {
                 backgroundColor: c.accent,
                 color: "#fff",
             },
             ".cm-lsp-hover": {
-                padding: "6px 8px",
-                maxWidth: "480px",
-                fontSize: "12.5px",
-                lineHeight: "1.5",
+                maxWidth: "560px",
             },
-            ".cm-lsp-hover pre": {
-                margin: "4px 0",
-                padding: "4px 6px",
+            ".cm-lsp-hover-scroll": {
+                maxHeight: "360px",
+                overflowY: "auto",
+                padding: "8px 12px",
+                fontSize: "13px",
+                lineHeight: "1.55",
+            },
+            // markdown-it's rendered output (see lsp/markdown.ts) — matching
+            // typography for the handful of elements hover/doc-comment content
+            // actually uses (paragraphs, lists, headings, inline code, links)
+            // rather than relying on unstyled browser defaults, which read as
+            // cramped and inconsistent with the rest of the app's spacing.
+            ".cm-lsp-hover-scroll p": { margin: "0 0 8px 0" },
+            ".cm-lsp-hover-scroll p:last-child": { marginBottom: 0 },
+            ".cm-lsp-hover-scroll ul, .cm-lsp-hover-scroll ol": {
+                margin: "0 0 8px 0",
+                paddingLeft: "20px",
+            },
+            ".cm-lsp-hover-scroll li": { marginBottom: "2px" },
+            ".cm-lsp-hover-scroll h1, .cm-lsp-hover-scroll h2, .cm-lsp-hover-scroll h3, .cm-lsp-hover-scroll h4":
+                {
+                    margin: "0 0 6px 0",
+                    fontSize: "13px",
+                    fontWeight: "600",
+                    color: c.text,
+                },
+            ".cm-lsp-hover-scroll hr": {
+                border: "none",
+                borderTop: `1px solid ${c.border}`,
+                margin: "8px 0",
+            },
+            ".cm-lsp-hover-scroll blockquote": {
+                margin: "0 0 8px 0",
+                padding: "2px 10px",
+                borderLeft: `3px solid ${c.border}`,
+                color: c.textMuted,
+            },
+            ".cm-lsp-hover-scroll a": { color: c.accent },
+            // Inline `code` — distinct from a *fenced* code block (below):
+            // a small pill, not a full block.
+            ".cm-lsp-hover-scroll p code, .cm-lsp-hover-scroll li code": {
+                fontFamily: "var(--font-mono)",
+                fontSize: "12px",
                 backgroundColor: c.bg,
+                border: `1px solid ${c.border}`,
+                borderRadius: "3px",
+                padding: "1px 4px",
+            },
+            // Fenced code blocks: full-width, syntax-highlighted via the
+            // `.hljs-*` classes app.css defines (kept in sync with this same
+            // theme's colors — see `applyAppColors`).
+            ".cm-lsp-hover-scroll pre": {
+                margin: "6px 0",
+                padding: "8px 10px",
+                backgroundColor: c.bg,
+                border: `1px solid ${c.border}`,
                 borderRadius: "4px",
                 overflowX: "auto",
             },
-            ".cm-lsp-hover code": {
+            ".cm-lsp-hover-scroll pre code": {
                 fontFamily: "var(--font-mono)",
-                fontSize: "12px",
+                fontSize: "12.5px",
+                lineHeight: "1.5",
+                backgroundColor: "transparent",
+                border: "none",
+                padding: 0,
             },
             ".cm-lsp-signature-help": {
-                padding: "6px 8px",
-                fontSize: "12.5px",
+                padding: "8px 12px",
+                fontSize: "13px",
+                maxWidth: "560px",
+            },
+            ".cm-lsp-signature-help > .cm-lsp-sig-label": {
                 fontFamily: "var(--font-mono)",
-                maxWidth: "480px",
+                fontSize: "12.5px",
             },
             ".cm-lsp-signature-help .cm-lsp-sig-active-param": {
                 fontWeight: "bold",
                 color: c.accent,
+                backgroundColor: c.bgHover,
+                borderRadius: "3px",
             },
             ".cm-lsp-signature-help .cm-lsp-sig-doc": {
-                marginTop: "4px",
+                marginTop: "6px",
+                paddingTop: "6px",
+                borderTop: `1px solid ${c.border}`,
                 fontFamily: "var(--font-ui)",
+                fontSize: "12.5px",
                 color: c.textMuted,
-                whiteSpace: "normal",
+            },
+            ".cm-lsp-signature-help .cm-lsp-sig-doc p": { margin: "0 0 4px 0" },
+            ".cm-lsp-signature-help .cm-lsp-sig-doc p:last-child": { marginBottom: 0 },
+            ".cm-lsp-signature-help .cm-lsp-sig-doc code": {
+                fontFamily: "var(--font-mono)",
+                fontSize: "11.5px",
+                backgroundColor: c.bg,
+                borderRadius: "3px",
+                padding: "1px 4px",
             },
             ".cm-lsp-rename-input": {
                 fontFamily: "var(--font-mono)",
@@ -204,4 +275,17 @@ export function applyAppColors(theme: Theme): void {
     root.setProperty("--color-text-faint", c.textFaint);
     root.setProperty("--color-accent", c.accent);
     root.setProperty("--color-focus-ring", c.focusRing);
+    root.setProperty("--color-syntax-comment", c.comment);
+    root.setProperty("--color-syntax-keyword", c.keyword);
+    root.setProperty("--color-syntax-control-keyword", c.controlKeyword);
+    root.setProperty("--color-syntax-variable", c.variable);
+    root.setProperty("--color-syntax-function", c.function);
+    root.setProperty("--color-syntax-type", c.type);
+    root.setProperty("--color-syntax-number", c.number);
+    root.setProperty("--color-syntax-string", c.string);
+    root.setProperty("--color-syntax-regexp", c.regexp);
+    root.setProperty("--color-syntax-operator", c.operator);
+    root.setProperty("--color-syntax-tag", c.tag);
+    root.setProperty("--color-syntax-attribute", c.attribute);
+    root.setProperty("--color-syntax-invalid", c.invalid);
 }
