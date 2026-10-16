@@ -16,6 +16,7 @@ import { clearDiagnosticsForUri } from "$lib/lsp/diagnostics";
 import { gitStore } from "./git.svelte";
 import { gitFileBaseline } from "$lib/api/git";
 import { setGitBaseline } from "$lib/editor/git-gutter";
+import { revealHighlight } from "$lib/editor/reveal-highlight";
 import { lspStore } from "$lib/lsp/manager.svelte";
 import { pathsEqual, canonicalPathKey } from "$lib/utils/path";
 
@@ -58,6 +59,13 @@ export interface RevealTarget {
     /** UTF-16 code unit offsets, matching search.rs's column units. */
     colStart: number;
     colEnd: number;
+    /** Optional UTF-16 offset of the match window's start within the full
+     *  line — set by workspace-search navigation for matches on lines the
+     *  backend windowed down (see `SearchMatch.lineTextOffset`), so
+     *  `applyPendingReveal` can translate window-relative columns back to
+     *  real document columns. Other callers (e.g. go-to-definition) pass
+     *  absolute positions and leave this undefined/0. */
+    lineTextOffset?: number;
 }
 
 /** `Text.of` splits on `\n` only, which would leave a stray `\r` at the
@@ -335,6 +343,7 @@ class EditorStore {
         line: number,
         colStart: number,
         colEnd: number,
+        lineTextOffset = 0,
     ): Promise<void> {
         // Captured *before* `open()` runs: if `path` is already the active tab,
         // `open()`'s early-return path touches nothing about it, so neither of
@@ -356,7 +365,7 @@ class EditorStore {
         const existing = this.findTab(path);
         const canonicalPath = existing?.path ?? path;
         const alreadyActive = existing !== undefined && pathsEqual(this.activePath ?? "", path);
-        this.pendingReveal = { path: canonicalPath, line, colStart, colEnd };
+        this.pendingReveal = { path: canonicalPath, line, colStart, colEnd, lineTextOffset };
         await this.open(path);
         if (alreadyActive && this.activeView) {
             this.applyPendingReveal(this.activeView);
@@ -374,12 +383,25 @@ class EditorStore {
         const doc = view.state.doc;
         const lineNumber = Math.min(Math.max(target.line, 1), doc.lines);
         const lineInfo = doc.line(lineNumber);
-        const from = Math.min(lineInfo.from + target.colStart, lineInfo.to);
-        const to = Math.min(lineInfo.from + target.colEnd, lineInfo.to);
+        // `lineTextOffset` shifts window-relative columns (a match the
+        // backend truncated down to a slice of an over-long line — see
+        // search.rs's `windowed_line`) back to absolute ones; it's 0 for
+        // every ordinary line and for non-search callers like
+        // go-to-definition, so this is a no-op there.
+        const offset = target.lineTextOffset ?? 0;
+        const from = Math.min(lineInfo.from + offset + target.colStart, lineInfo.to);
+        const to = Math.min(lineInfo.from + offset + target.colEnd, lineInfo.to);
 
         view.dispatch({
             selection: EditorSelection.range(from, to),
-            effects: EditorView.scrollIntoView(from, { y: "center" }),
+            effects: [
+                EditorView.scrollIntoView(from, { y: "center" }),
+                // Brief flash highlight so the user actually *sees* where
+                // they landed — clicking a search result in a file that was
+                // already open on screen otherwise moves only the caret,
+                // which is easy to miss in a long document.
+                revealHighlight.of({ from, to }),
+            ].flat(),
         });
         view.focus();
     }
@@ -516,10 +538,35 @@ class EditorStore {
      *  see its doc comment for why a multi-root workspace needs that
      *  extra step. */
 
+    /** Lightweight-LSP gate (see AGENT.md's "lazy mode" note). The
+     *  html/css/json servers come from `vscode-langservers-extracted` — a
+     *  Node process each, with an npm install standing behind them if this
+     *  app hasn't fetched one yet. For a plain static html/css/js folder
+     *  with no project manifest anywhere, that's a lot of machinery for
+     *  what CodeMirror's own modes + Emmet already cover (highlighting,
+     *  tag auto-rename, snippets, color chips), so those languages only get
+     *  their server when root detection actually found a project covering
+     *  the file (`package.json`, `tsconfig.json`, …) — exactly how VS Code
+     *  behaves for a lone `.html` opened outside any workspace. Everything
+     *  else (typescript, rust, go, python, …) always starts on open: either
+     *  the language is meaningless without semantic info (Rust/Go/Python)
+     *  or the fallback TS server path makes it cheap enough to justify. */
+    private shouldStartServer(path: string, languageId: string): boolean {
+        switch (languageId) {
+            case "html":
+            case "css":
+            case "json":
+                return lspStore.hasProjectRootFor(path);
+            default:
+                return true;
+        }
+    }
+
     private notifyLspOpen(path: string, text: string, attemptsLeft = 3): void {
         const languageId = lspLanguageIdFor(path);
         const workspaceRoot = workspace.rootPath;
         if (!languageId || !workspaceRoot) return;
+        if (!this.shouldStartServer(path, languageId)) return;
         const root = lspStore.resolveRootFor(path, languageId, workspaceRoot);
 
         // Starting the server here (rather than eagerly for the whole
