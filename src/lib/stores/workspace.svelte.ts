@@ -144,7 +144,14 @@ class WorkspaceState {
             // (a slow/huge repo's status walk is unrelated to whether the
             // *files* are ready to show), and `setRoot` handles its own errors.
             void gitStore.scanWorkspace(path);
-            // void lspStore.startForWorkspace(path);
+            // Not awaited either — root detection spawns nothing by itself
+            // (lazy mode: servers start on first file open, see AGENT.md §9)
+            // but it does await an event-listener setup + a filesystem scan;
+            // blocking `open()` on it would delay the tree for no reason.
+            // This used to be commented out, which silently broke every
+            // non-TypeScript/multi-root project: without it `roots` stayed
+            // empty and `resolveRootFor` fell back to no root at all.
+            void lspStore.startForWorkspace(path);
         } catch (err) {
             this.reportError(err);
         }

@@ -222,7 +222,16 @@ class WorkspaceSearchStore {
     }
 
     navigate(path: string, match: SearchMatch): void {
-        void editorStore.openAndReveal(path, match.line, match.colStart, match.colEnd);
+        // `lineTextOffset` translates window-relative columns back to
+        // absolute ones for matches the backend truncated down to a slice
+        // of an over-long line (see search.rs's `windowed_line`).
+        void editorStore.openAndReveal(
+            path,
+            match.line,
+            match.colStart,
+            match.colEnd,
+            match.lineTextOffset,
+        );
     }
 
     // --- replace ---------------------------------------------------------------

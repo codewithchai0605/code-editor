@@ -54,6 +54,7 @@ import { lspDefinitionHandler, lspGoToDefinitionCommand } from "$lib/lsp/definit
 import { lspRenameCommand, lspRenameExtension } from "$lib/lsp/rename";
 import { lspCodeActionCommand } from "$lib/lsp/code-action";
 import { editorContextMenu } from "./context-menu";
+import { revealHighlightExtension } from "./reveal-highlight";
 
 /**
  * Holds the theme's CodeMirror extension (chrome + syntax highlighting)
@@ -158,6 +159,7 @@ export function baseExtensions(
         tagAutoRename(),
         indentationFolding,
         colorChips(),
+        revealHighlightExtension(),
         lintGutter(),
         themeCompartment.of(buildCmTheme(initialTheme)),
         ...(filePath
