@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { SvelteMap } from "svelte/reactivity";
 import { toastStore } from "./toast.svelte";
+import { canonicalPathKey } from "$lib/utils/path";
 import {
     gitListRepos,
     gitStatus,
@@ -92,8 +93,14 @@ class GitStore {
      *  normalize a repo's workdir to a lowercase drive letter regardless of
      *  how the path was originally opened — lowercasing both sides of every
      *  lookup sidesteps that. Backslash/forward-slash is normalized too. */
+    /** Shared with `editor.svelte.ts`/`Breadcrumbs.svelte`/the LSP layer
+     *  (see `canonicalPathKey`'s doc comment) rather than this store's own
+     *  unconditional `.toLowerCase()`, which — on a case-sensitive
+     *  filesystem (Linux/Mac) — could wrongly collide two distinct files
+     *  that differ only in case, e.g. `Readme.md` and `readme.md` both
+     *  existing in the same repo. */
     private normalizeKey(path: string): string {
-        return path.toLowerCase().replace(/\\/g, "/");
+        return canonicalPathKey(path);
     }
 
     statusFor(path: string): GitFileEntry | undefined {

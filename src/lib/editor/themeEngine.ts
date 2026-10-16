@@ -133,6 +133,40 @@ export function buildCmTheme(theme: Theme): Extension {
                 border: "none",
                 padding: 0,
             },
+            // The "-"/"+" expand-verbosity control (see lsp/hover.ts) — only
+            // ever added to the DOM for a server that actually supports it,
+            // so this never shows for a plain hover.
+            ".cm-lsp-hover-toolbar": {
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "2px",
+                padding: "2px 6px",
+                borderTop: `1px solid ${c.border}`,
+            },
+            ".cm-lsp-hover-verbosity-btn": {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: "20px",
+                height: "18px",
+                padding: 0,
+                fontFamily: "var(--font-ui)",
+                fontSize: "13px",
+                lineHeight: "1",
+                color: c.textMuted,
+                backgroundColor: "transparent",
+                border: `1px solid ${c.border}`,
+                borderRadius: "3px",
+                cursor: "pointer",
+            },
+            ".cm-lsp-hover-verbosity-btn:hover:not(:disabled)": {
+                backgroundColor: c.bgHover,
+                color: c.text,
+            },
+            ".cm-lsp-hover-verbosity-btn:disabled": {
+                opacity: 0.35,
+                cursor: "not-allowed",
+            },
             ".cm-lsp-signature-help": {
                 padding: "8px 12px",
                 fontSize: "13px",

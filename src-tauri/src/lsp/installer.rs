@@ -33,13 +33,8 @@ fn log(app: &AppHandle, root: &Path, language_id: &str, line: impl Into<String>)
     );
 }
 
-/// One directory per `(language_id, command)` pair — e.g. switching
-/// TypeScript's variant between `typescript-language-server` and `tsc`
-/// gets two independent installs rather than one fighting the other.
-fn tool_dir(app: &AppHandle, language_id: &str, command: &str) -> Result<PathBuf, String> {
-    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let safe_command: String = command
-        .chars()
+fn sanitize_path_component(s: &str) -> String {
+    s.chars()
         .map(|c| {
             if c.is_alphanumeric() || c == '-' || c == '_' {
                 c
@@ -47,30 +42,171 @@ fn tool_dir(app: &AppHandle, language_id: &str, command: &str) -> Result<PathBuf
                 '_'
             }
         })
-        .collect();
-    Ok(base.join("lsp-tools").join(language_id).join(safe_command))
+        .collect()
 }
 
-const MARKER_FILE: &str = ".codeeditor-installed-binary";
+/// One directory per install — either `(language_id, command)` (the
+/// default: e.g. switching TypeScript's variant between
+/// `typescript-language-server` and `tsc` gets two independent installs
+/// rather than one fighting the other), or, when `config.install_group`
+/// is set, shared across every `ServerConfig` — possibly for a different
+/// `language_id` entirely — that names the same group. That's for a
+/// package that provides *several different* language servers as
+/// separate binaries from one install, like `vscode-langservers-extracted`
+/// (html/css/json all come from one `npm install`): without sharing the
+/// directory, opening an html file, then a css file, then a json file
+/// would trigger the exact same `npm install` three separate times, once
+/// per language, into three different directories. See
+/// `ServerConfig::install_group`'s own doc comment in `registry.rs`.
+fn tool_dir(app: &AppHandle, language_id: &str, config: &ServerConfig) -> Result<PathBuf, String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    if let Some(group) = &config.install_group {
+        return Ok(base
+            .join("lsp-tools")
+            .join("_bundles")
+            .join(sanitize_path_component(group)));
+    }
+    Ok(base
+        .join("lsp-tools")
+        .join(language_id)
+        .join(sanitize_path_component(&config.command)))
+}
+
+/// Per-`command` marker filename, not one fixed name — a shared bundle
+/// directory (see `tool_dir`) holds one installed-from-here binary per
+/// language, and each needs its own independent record: html's marker
+/// shouldn't make `installed_binary_path` think css is installed too
+/// (`installed_binary_path` still handles that case, but via the
+/// `expected_binary_path` fallback below, not by conflating markers).
+fn marker_file_name(command: &str) -> String {
+    format!(".codeeditor-installed-{}", sanitize_path_component(command))
+}
 
 /// The binary path recorded by a previous successful `install()` for this
 /// `(language_id, command)`, if the file it points to still exists —
 /// checked by `manager.rs`'s `resolve_program` *before* ever falling back
 /// to `which` on PATH, so an app-managed install always wins over (and
 /// never conflicts with) anything else the user separately has on PATH.
-pub fn installed_binary_path(app: &AppHandle, language_id: &str, command: &str) -> Option<PathBuf> {
-    let dir = tool_dir(app, language_id, command).ok()?;
-    let recorded = std::fs::read_to_string(dir.join(MARKER_FILE)).ok()?;
-    let path = PathBuf::from(recorded.trim());
-    path.is_file().then_some(path)
+///
+/// For a bundle member (`config.install_group` is `Some`) whose own
+/// marker hasn't been written yet, also checks whether the expected
+/// binary is already sitting in the shared install directory anyway —
+/// which happens whenever a *different* language in the same group
+/// triggered the install first (see `tool_dir`'s doc comment). Recognizing
+/// that directly, rather than only ever trusting this exact command's own
+/// marker, is what makes opening the second and third file type from a
+/// shared package "just work" without their own separate "Install" click.
+pub fn installed_binary_path(
+    app: &AppHandle,
+    language_id: &str,
+    config: &ServerConfig,
+) -> Option<PathBuf> {
+    let dir = tool_dir(app, language_id, config).ok()?;
+
+    if let Ok(recorded) = std::fs::read_to_string(dir.join(marker_file_name(&config.command))) {
+        let path = PathBuf::from(recorded.trim());
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    if config.install_group.is_none() {
+        return None;
+    }
+    let expected = expected_binary_path(&dir, config)?;
+    if expected.is_file() {
+        // Opportunistically record it under this command's own marker so
+        // the next lookup doesn't need to touch the filesystem again.
+        let _ = record_installed_binary(&dir, &config.command, &expected);
+        return Some(expected);
+    }
+    None
 }
 
-fn record_installed_binary(dir: &Path, binary_path: &Path) -> Result<(), String> {
+/// Where `config`'s binary ends up after a *successful* install, by its
+/// strategy's own naming convention — used only by `installed_binary_path`
+/// (see its doc comment) to recognize a bundle member's binary that a
+/// *sibling* entry's install already produced, without needing to re-run
+/// anything. `None` for `Manual` (never produces one) or an entry with no
+/// install strategy at all.
+///
+/// Each `install_npm`/`install_pip`/`install_go`/`install_rust_analyzer`
+/// below independently validates its own freshly-completed install with
+/// this exact same formula, inline — if you change one, change both.
+fn expected_binary_path(dir: &Path, config: &ServerConfig) -> Option<PathBuf> {
+    match config.install.as_ref()? {
+        InstallStrategy::Npm { .. } => {
+            let bin_name = if cfg!(windows) {
+                format!("{}.cmd", config.command)
+            } else {
+                config.command.clone()
+            };
+            Some(dir.join("node_modules").join(".bin").join(bin_name))
+        }
+        InstallStrategy::Pip { .. } => {
+            let bin_dir = if cfg!(windows) {
+                dir.join("venv").join("Scripts")
+            } else {
+                dir.join("venv").join("bin")
+            };
+            let bin_name = if cfg!(windows) {
+                format!("{}.exe", config.command)
+            } else {
+                config.command.clone()
+            };
+            Some(bin_dir.join(bin_name))
+        }
+        InstallStrategy::Go { .. } => {
+            let bin_name = if cfg!(windows) {
+                format!("{}.exe", config.command)
+            } else {
+                config.command.clone()
+            };
+            Some(dir.join(bin_name))
+        }
+        InstallStrategy::RustAnalyzer => Some(dir.join(if cfg!(windows) {
+            "rust-analyzer.exe"
+        } else {
+            "rust-analyzer"
+        })),
+        InstallStrategy::Manual { .. } => None,
+    }
+}
+
+fn record_installed_binary(dir: &Path, command: &str, binary_path: &Path) -> Result<(), String> {
     std::fs::write(
-        dir.join(MARKER_FILE),
+        dir.join(marker_file_name(command)),
         binary_path.to_string_lossy().as_bytes(),
     )
     .map_err(|e| e.to_string())
+}
+
+/// The `typescript` package's `lib` directory inside this app's own
+/// install for `config` (see `tool_dir`) — `None` if `config` wasn't
+/// actually installed that way (a manually-configured `command` pointing
+/// somewhere else entirely) or just hasn't been installed yet.
+///
+/// Used by `manager.rs` to give typescript-language-server a working
+/// `tsserver.fallbackPath`: without one, a project with no `node_modules`
+/// of its own (a plain script, or a dependency list that just hasn't been
+/// `npm install`ed yet) makes the server hard-fail to even start —
+/// "Could not find a valid TypeScript installation ... Exiting" — since
+/// this app's own isolated, non-PATH install (deliberately isolated, see
+/// this module's doc comment) isn't somewhere typescript-language-server
+/// would otherwise think to look on its own. See that call site's doc
+/// comment for the full reasoning, including why this is a *fallback*
+/// path specifically and not an override.
+pub fn bundled_typescript_lib_dir(
+    app: &AppHandle,
+    language_id: &str,
+    config: &ServerConfig,
+) -> Option<PathBuf> {
+    let dir = tool_dir(app, language_id, config)
+        .ok()?
+        .join("node_modules")
+        .join("typescript")
+        .join("lib");
+    dir.join("tsserver.js").is_file().then_some(dir)
 }
 
 /// `true` if `config` has an install strategy that can actually attempt
@@ -88,6 +224,16 @@ pub fn is_auto_installable(config: &ServerConfig) -> bool {
 /// have open for it. Returns the path `manager.rs` should launch on
 /// success; the caller is responsible for actually starting the server
 /// afterward (this only installs it).
+///
+/// For a bundle member (see `tool_dir`), this still runs the full install
+/// command even if a sibling already installed the shared package —
+/// `npm install`/`pip install`/etc are all safe to re-run (they no-op
+/// once everything's already satisfied) and re-running keeps this
+/// function's contract simple ("always ends with the binary freshly
+/// verified to exist"). The redundant run is only ever a manual "Install"
+/// click away, though: `resolve_program`/`installed_binary_path` already
+/// recognize a sibling's install and skip offering that click at all in
+/// the common case (see `installed_binary_path`'s doc comment).
 pub async fn install(
     app: &AppHandle,
     root: &Path,
@@ -101,7 +247,7 @@ pub async fn install(
         ));
     };
 
-    let dir = tool_dir(app, language_id, &config.command)?;
+    let dir = tool_dir(app, language_id, config)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
 
     log(
@@ -125,7 +271,7 @@ pub async fn install(
         InstallStrategy::Manual { instructions } => Err(instructions.clone()),
     }?;
 
-    record_installed_binary(&dir, &binary_path)?;
+    record_installed_binary(&dir, &config.command, &binary_path)?;
     log(
         app,
         root,

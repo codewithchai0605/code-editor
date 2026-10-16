@@ -8,6 +8,12 @@ import { extensionOf } from "$lib/utils/fileIcons";
  * normal, expected state (most extensions won't have a server configured),
  * not an error. Extend this alongside the registry's default entries in
  * `src-tauri/src/lsp/registry.rs` when adding a new language.
+ *
+ * `dart`/`go`/`cpp`/`php` were already fully configured on the registry
+ * side (`default_servers()`) but had no entry here at all — meaning
+ * `.dart`/`.go`/`.cpp`/`.php` files got zero LSP features no matter what,
+ * since this map is what turns a file into a language ID in the first
+ * place. Filled in alongside adding html/css/json.
  */
 const LANGUAGE_IDS: Record<string, string> = {
     ts: "typescript",
@@ -18,6 +24,24 @@ const LANGUAGE_IDS: Record<string, string> = {
     cjs: "typescript",
     py: "python",
     rs: "rust",
+    dart: "dart",
+    go: "go",
+    cpp: "cpp",
+    cc: "cpp",
+    cxx: "cpp",
+    c: "cpp",
+    h: "cpp",
+    hpp: "cpp",
+    hh: "cpp",
+    php: "php",
+    // vscode-langservers-extracted (see registry.rs) — no project manifest
+    // needed, so these work in a plain static html/css/js site same as
+    // TypeScript/JS do (see the "classic" TypeScript variant's
+    // `tsserver.fallbackPath` for that half of the story).
+    html: "html",
+    htm: "html",
+    css: "css",
+    json: "json",
 };
 
 export function lspLanguageIdFor(fileName: string): string | null {

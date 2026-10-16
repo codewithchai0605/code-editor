@@ -53,6 +53,7 @@ import { lspSignatureHelpTooltip } from "$lib/lsp/signature-help";
 import { lspDefinitionHandler, lspGoToDefinitionCommand } from "$lib/lsp/definition";
 import { lspRenameCommand, lspRenameExtension } from "$lib/lsp/rename";
 import { lspCodeActionCommand } from "$lib/lsp/code-action";
+import { editorContextMenu } from "./context-menu";
 
 /**
  * Holds the theme's CodeMirror extension (chrome + syntax highlighting)
@@ -167,6 +168,7 @@ export function baseExtensions(
                   lspSignatureHelpTooltip(filePath),
                   lspDefinitionHandler(filePath),
                   lspRenameExtension(),
+                  editorContextMenu(filePath),
               ]
             : []),
         keymap.of([

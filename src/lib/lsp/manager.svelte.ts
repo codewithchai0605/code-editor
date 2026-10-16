@@ -13,7 +13,8 @@ import {
     lspStopAll,
 } from "$lib/api/lsp";
 import { setDiagnosticsForUri } from "./diagnostics";
-import { pathToFileUri } from "./uri";
+import { fileUriToPath } from "./uri";
+import { isPathUnder, pathsEqual } from "$lib/utils/path";
 import { editorStore } from "$lib/stores/editor.svelte";
 import { toastStore } from "$lib/stores/toast.svelte";
 import type {
@@ -36,15 +37,6 @@ const LOG_CAP = 500;
 
 function serverKey(root: string, languageId: string): string {
     return `${root}\u0000${languageId}`;
-}
-
-/** True if `path` is `root` itself or somewhere underneath it — both
- *  compared with backslashes normalized to forward slashes so this works
- *  the same regardless of platform. */
-function isUnderRoot(root: string, path: string): boolean {
-    const r = root.replace(/\\/g, "/").replace(/\/+$/, "");
-    const p = path.replace(/\\/g, "/");
-    return p === r || p.startsWith(r + "/");
 }
 
 class LspStore {
@@ -99,7 +91,7 @@ class LspStore {
         let best: string | null = null;
         for (const candidate of this.roots) {
             if (candidate.languageId !== languageId) continue;
-            if (!isUnderRoot(candidate.root, path)) continue;
+            if (!isPathUnder(candidate.root, path)) continue;
             if (!best || candidate.root.length > best.length) best = candidate.root;
         }
         return best ?? fallbackRoot;
@@ -292,7 +284,13 @@ class LspStore {
             // becomes part of the active state.
             const activeTab = editorStore.activeTab;
             const view = editorStore.view;
-            if (activeTab && view && pathToFileUri(activeTab.path) === uri) {
+            // `pathsEqual`, not `===` on the two URIs directly — a
+            // `publishDiagnostics` notification's `uri` isn't guaranteed to
+            // come back with the same drive-letter case/separators this
+            // app used to open the file (same root cause as
+            // `editor.svelte.ts`'s `findTab`), so comparing the decoded
+            // paths is what actually notices "this is the file on screen".
+            if (activeTab && view && pathsEqual(activeTab.path, fileUriToPath(uri))) {
                 forceLinting(view);
             }
         });

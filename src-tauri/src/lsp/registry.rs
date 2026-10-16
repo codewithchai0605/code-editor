@@ -111,6 +111,31 @@ pub struct ServerConfig {
     /// entry, most likely). See `InstallStrategy` and `installer.rs`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub install: Option<InstallStrategy>,
+    /// Groups this server's install with every other `ServerConfig` that
+    /// names the same group, so they share **one** install directory and
+    /// **one** `npm install`/`pip install`/etc run instead of each
+    /// re-running its own — for a package that legitimately provides
+    /// several *different* language servers as separate binaries, like
+    /// `vscode-langservers-extracted` (html/css/json all come from one
+    /// npm install). `None` (the default, and every entry before this
+    /// field existed) keeps today's behavior exactly: one install
+    /// directory per `(language_id, command)`, entirely independent of
+    /// every other entry. See `installer.rs`'s `tool_dir` for where this
+    /// is actually read.
+    ///
+    /// Only meaningful between entries that use the *same* `install`
+    /// strategy and `packages` — this doesn't merge or reconcile
+    /// different strategies, it just points them at the same directory,
+    /// so a mismatched group (different packages under the same group
+    /// name) would just mean whichever installs first "wins" the
+    /// directory and the other's install overwrites it. `default_servers`
+    /// only ever sets this for entries that are already known to agree.
+    #[serde(
+        default,
+        rename = "installGroup",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub install_group: Option<String>,
 }
 
 /// A language entry with more than one possible server — see the module
@@ -322,6 +347,32 @@ fn migrate_legacy_config_if_present(
     }
 }
 
+/// One-time repair for a workspace whose `lsp-config.json` entry predates
+/// `supportsHoverVerbosity` support (see `default_servers()`'s "classic"
+/// TypeScript variant, below) — without this, a workspace that was
+/// already opened once before that field existed keeps its old,
+/// persisted `initializationOptions: null` forever, since
+/// `default_servers()` only ever runs the *first* time a workspace is
+/// seen (see `load_registry`). Only touches the field when it's still
+/// completely unset and the command is still the stock
+/// `typescript-language-server`, so a user's own deliberate
+/// `initializationOptions` for this variant (added by hand, or a
+/// `command` pointed at something else entirely) is left untouched.
+fn backfill_hover_verbosity_support(servers: &mut HashMap<String, ServerEntry>) -> bool {
+    let Some(ServerEntry::Multi(multi)) = servers.get_mut("typescript") else {
+        return false;
+    };
+    let Some(classic) = multi.variants.get_mut("classic") else {
+        return false;
+    };
+    if classic.command != "typescript-language-server" || classic.initialization_options.is_some()
+    {
+        return false;
+    }
+    classic.initialization_options = Some(serde_json::json!({ "supportsHoverVerbosity": true }));
+    true
+}
+
 /// Loads (and, the very first time a workspace is seen, seeds and
 /// persists) this workspace's registry entry from the app's own config
 /// store — see the module doc comment for why that's a central,
@@ -331,7 +382,11 @@ pub fn load_registry(app: &AppHandle, workspace_root: &Path) -> Registry {
     migrate_legacy_config_if_present(app, workspace_root, &mut store);
 
     let key = workspace_key(workspace_root);
-    if let Some(file) = store.workspaces.remove(&key) {
+    if let Some(mut file) = store.workspaces.remove(&key) {
+        if backfill_hover_verbosity_support(&mut file.servers) {
+            store.workspaces.insert(key, file.clone());
+            let _ = write_store(app, &store);
+        }
         return Registry {
             servers: file.servers,
             root_overrides: file.root_overrides,
@@ -375,10 +430,35 @@ fn default_servers() -> HashMap<String, ServerEntry> {
                             command: "typescript-language-server".to_string(),
                             args: vec!["--stdio".to_string()],
                             root_markers: vec!["package.json".to_string(), "tsconfig.json".to_string()],
-                            initialization_options: None,
+                            // `supportsHoverVerbosity` is a required opt-in,
+                            // not just a capability the server advertises on
+                            // its own: typescript-language-server keeps its
+                            // internal `hoverVerbositySupport` flag false
+                            // until the client explicitly sets this in
+                            // `initializationOptions`, and while it's false
+                            // the server silently drops any `verbosityLevel`
+                            // sent on a hover request and never adds
+                            // `canIncreaseVerbosityLevel`/
+                            // `canDecreaseVerbosityLevel` to the response —
+                            // so the "+`/`-`" expand-hover control
+                            // (lsp/hover.ts) would stay hidden forever
+                            // without this, even though the per-request
+                            // wiring is otherwise correct. Requires
+                            // TypeScript 5.9+ and typescript-language-server
+                            // >=5.3.0; harmless (silently ignored) on an
+                            // older pair of either, since a hover response
+                            // simply won't include the verbosity fields and
+                            // lsp/hover.ts only shows the control when they
+                            // do. See typescript-language-server's own
+                            // docs/configuration.md, "supportsHoverVerbosity
+                            // option".
+                            initialization_options: Some(serde_json::json!({
+                                "supportsHoverVerbosity": true,
+                            })),
                             install: Some(InstallStrategy::Npm {
                                 packages: vec!["typescript-language-server".to_string(), "typescript".to_string()],
                             }),
+                            install_group: None,
                         },
                     ),
                     (
@@ -412,6 +492,7 @@ fn default_servers() -> HashMap<String, ServerEntry> {
                             // to a <7 release, which has no `--lsp` mode
                             // at all (that's the *point* of this variant).
                             install: Some(InstallStrategy::Npm { packages: vec!["typescript@^7".to_string()] }),
+                            install_group: None,
                         },
                     ),
                 ]),
@@ -427,6 +508,7 @@ fn default_servers() -> HashMap<String, ServerEntry> {
                 root_markers: vec!["pyproject.toml".to_string(), "requirements.txt".to_string()],
                 initialization_options: None,
                 install: Some(InstallStrategy::Pip { packages: vec!["python-lsp-server".to_string()] }),
+                install_group: None,
             }),
         ),
         (
@@ -437,6 +519,7 @@ fn default_servers() -> HashMap<String, ServerEntry> {
                 root_markers: vec!["Cargo.toml".to_string()],
                 initialization_options: None,
                 install: Some(InstallStrategy::RustAnalyzer),
+                install_group: None,
             }),
         ),
         (
@@ -454,6 +537,7 @@ fn default_servers() -> HashMap<String, ServerEntry> {
                 install: Some(InstallStrategy::Manual {
                     instructions: "Install the Dart SDK, which includes its language server: https://dart.dev/get-dart".to_string(),
                 }),
+                install_group: None,
             }),
         ),
         (
@@ -464,6 +548,7 @@ fn default_servers() -> HashMap<String, ServerEntry> {
                 root_markers: vec!["go.mod".to_string()],
                 initialization_options: None,
                 install: Some(InstallStrategy::Go { packages: vec!["golang.org/x/tools/gopls@latest".to_string()] }),
+                install_group: None,
             }),
         ),
         (
@@ -481,6 +566,7 @@ fn default_servers() -> HashMap<String, ServerEntry> {
                 install: Some(InstallStrategy::Manual {
                     instructions: "Install clangd (usually via LLVM): apt install clangd (Linux), brew install llvm (macOS), or https://github.com/llvm/llvm-project/releases (Windows)".to_string(),
                 }),
+                install_group: None,
             }),
         ),
         (
@@ -491,6 +577,63 @@ fn default_servers() -> HashMap<String, ServerEntry> {
                 root_markers: vec!["composer.json".to_string()],
                 initialization_options: None,
                 install: Some(InstallStrategy::Npm { packages: vec!["intelephense".to_string()] }),
+                install_group: None,
+            }),
+        ),
+        // The three below all come from one npm package
+        // (`vscode-langservers-extracted`, the actively-maintained fork
+        // of VS Code's own bundled html/css/json language servers — see
+        // <https://www.npmjs.com/package/vscode-langservers-extracted>),
+        // so they share one `installGroup`: opening the first of an
+        // html/css/json file triggers one `npm install`, and the other
+        // two find their binary already sitting in that same shared
+        // install directory the next time *they're* opened, rather than
+        // each independently re-installing the same package. Deliberately
+        // empty `rootMarkers` for all three — unlike TypeScript or a
+        // Cargo/Go project, there's no manifest file a plain static
+        // html/css/js site is expected to have at all, and these servers
+        // don't need a "project" in that sense anyway: each document is
+        // handled independently. With no marker to detect, every file of
+        // these languages simply resolves to the workspace root (see
+        // `lsp/manager.svelte.ts`'s `resolveRootFor` — that's the
+        // intended fallback, not a gap).
+        (
+            "html".to_string(),
+            ServerEntry::Single(ServerConfig {
+                command: "vscode-html-language-server".to_string(),
+                args: vec!["--stdio".to_string()],
+                root_markers: vec![],
+                initialization_options: None,
+                install: Some(InstallStrategy::Npm {
+                    packages: vec!["vscode-langservers-extracted".to_string()],
+                }),
+                install_group: Some("vscode-langservers-extracted".to_string()),
+            }),
+        ),
+        (
+            "css".to_string(),
+            ServerEntry::Single(ServerConfig {
+                command: "vscode-css-language-server".to_string(),
+                args: vec!["--stdio".to_string()],
+                root_markers: vec![],
+                initialization_options: None,
+                install: Some(InstallStrategy::Npm {
+                    packages: vec!["vscode-langservers-extracted".to_string()],
+                }),
+                install_group: Some("vscode-langservers-extracted".to_string()),
+            }),
+        ),
+        (
+            "json".to_string(),
+            ServerEntry::Single(ServerConfig {
+                command: "vscode-json-language-server".to_string(),
+                args: vec!["--stdio".to_string()],
+                root_markers: vec![],
+                initialization_options: None,
+                install: Some(InstallStrategy::Npm {
+                    packages: vec!["vscode-langservers-extracted".to_string()],
+                }),
+                install_group: Some("vscode-langservers-extracted".to_string()),
             }),
         ),
     ])
@@ -681,9 +824,11 @@ pub fn list_server_configs(app: &AppHandle, workspace_root: &Path) -> Vec<Server
 /// know the entry's current shape.
 ///
 /// Preserves whatever this exact `(language_id, variant)` already had for
-/// `install`/`initializationOptions` — fields this simple command/args/
-/// root-markers form doesn't expose — so tweaking, say, rust-analyzer's
-/// args doesn't silently drop its auto-install capability.
+/// `install`/`initializationOptions`/`installGroup` — fields this simple
+/// command/args/root-markers form doesn't expose — so tweaking, say,
+/// rust-analyzer's args doesn't silently drop its auto-install capability,
+/// and editing the CSS server's command doesn't silently un-share its
+/// install directory from the HTML/JSON servers it came bundled with.
 pub fn upsert_server_config(
     app: &AppHandle,
     workspace_root: &Path,
@@ -713,7 +858,8 @@ pub fn upsert_server_config(
         initialization_options: existing
             .as_ref()
             .and_then(|c| c.initialization_options.clone()),
-        install: existing.and_then(|c| c.install),
+        install: existing.as_ref().and_then(|c| c.install.clone()),
+        install_group: existing.and_then(|c| c.install_group),
     };
 
     match variant {

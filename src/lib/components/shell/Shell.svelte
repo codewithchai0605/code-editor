@@ -19,6 +19,7 @@
     import ToastHost from "./ToastHost.svelte";
     import ContextMenu from "./ContextMenu.svelte";
     import { codeActionMenuState } from "$lib/lsp/code-action-menu.svelte";
+    import { editorContextMenuState } from "$lib/editor/context-menu.svelte";
 
     onMount(() => {
         themeStore.applyInitial();
@@ -125,6 +126,17 @@
             y={codeActionMenuState.request.y}
             items={codeActionMenuState.request.items}
             onClose={() => codeActionMenuState.close()}
+        />
+    {/key}
+{/if}
+
+{#if editorContextMenuState.request}
+    {#key editorContextMenuState.request}
+        <ContextMenu
+            x={editorContextMenuState.request.x}
+            y={editorContextMenuState.request.y}
+            items={editorContextMenuState.request.items}
+            onClose={() => editorContextMenuState.close()}
         />
     {/key}
 {/if}

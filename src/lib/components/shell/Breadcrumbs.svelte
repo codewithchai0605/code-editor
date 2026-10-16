@@ -1,6 +1,7 @@
 <script lang="ts">
     import { workspace } from "$lib/stores/workspace.svelte";
     import { layout } from "$lib/stores/layout.svelte";
+    import { isPathUnder } from "$lib/utils/path";
 
     interface Props {
         path: string;
@@ -12,9 +13,18 @@
     // breadcrumb behavior. Falls back to showing the whole path as one
     // segment if it isn't actually inside the open workspace for some reason
     // (shouldn't normally happen, but a bare crumb beats a broken one).
+    //
+    // `isPathUnder` rather than a plain `path.startsWith(root)`: a `path`
+    // that reached here via go-to-definition/a workspace symbol/a rename
+    // isn't guaranteed to share `root`'s exact drive-letter case or
+    // separator style even when it's genuinely inside the workspace (a
+    // language server's own URIs commonly normalize both) — a raw
+    // `startsWith` would take the "not in this workspace" fallback for a
+    // file that actually is, which is what produced the flattened,
+    // un-segmented breadcrumb full of forward slashes.
     const segments = $derived.by(() => {
         const root = workspace.rootPath;
-        if (!root || !path.startsWith(root)) return [{ name: path, fullPath: path, isDir: false }];
+        if (!root || !isPathUnder(root, path)) return [{ name: path, fullPath: path, isDir: false }];
 
         const rest = path.slice(root.length).replace(/^[\\/]+/, "");
         const parts = rest.split(/[\\/]+/).filter(Boolean);

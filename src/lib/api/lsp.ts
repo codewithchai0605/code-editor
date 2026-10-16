@@ -117,8 +117,20 @@ export function lspCompletion(root: string, languageId: string, uri: string, pos
     return invoke("lsp_completion", { root, languageId, uri, position });
 }
 
-export function lspHover(root: string, languageId: string, uri: string, position: LspPosition): Promise<any> {
-    return invoke("lsp_hover", { root, languageId, uri, position });
+export function lspHover(
+    root: string,
+    languageId: string,
+    uri: string,
+    position: LspPosition,
+    verbosityLevel?: number,
+): Promise<any> {
+    return invoke("lsp_hover", {
+        root,
+        languageId,
+        uri,
+        position,
+        verbosityLevel: verbosityLevel ?? null,
+    });
 }
 
 export function lspDefinition(root: string, languageId: string, uri: string, position: LspPosition): Promise<any> {

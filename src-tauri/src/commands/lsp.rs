@@ -262,9 +262,16 @@ pub async fn lsp_hover(
     language_id: String,
     uri: String,
     position: Position,
+    verbosity_level: Option<i32>,
 ) -> Result<Value, String> {
     manager
-        .hover(&PathBuf::from(root), &language_id, &uri, position)
+        .hover(
+            &PathBuf::from(root),
+            &language_id,
+            &uri,
+            position,
+            verbosity_level,
+        )
         .await
 }
 

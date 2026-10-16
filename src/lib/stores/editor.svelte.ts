@@ -17,6 +17,7 @@ import { gitStore } from "./git.svelte";
 import { gitFileBaseline } from "$lib/api/git";
 import { setGitBaseline } from "$lib/editor/git-gutter";
 import { lspStore } from "$lib/lsp/manager.svelte";
+import { pathsEqual, canonicalPathKey } from "$lib/utils/path";
 
 const LSP_CHANGE_DEBOUNCE_MS = 300;
 
@@ -157,8 +158,15 @@ class EditorStore {
         return this.tabs.find((t) => t.path === this.activePath);
     }
 
+    /** Uses `pathsEqual`, not `===` — `path` may have come back from a
+     *  language server (go-to-definition, workspace symbols, a rename's
+     *  workspace edit, ...), which doesn't promise to preserve the exact
+     *  drive-letter case/separator style this app used when it first
+     *  opened the file. A raw `===` here is what used to make Ctrl+Click
+     *  on a symbol in the *same* already-open file open a second,
+     *  duplicate tab for it. See `canonicalPathKey`'s doc comment. */
     private findTab(path: string): OpenTab | undefined {
-        return this.tabs.find((t) => t.path === path);
+        return this.tabs.find((t) => pathsEqual(t.path, path));
     }
 
     /** Wires up the backend's `fs:changed` event (see fs.rs's
@@ -191,9 +199,9 @@ class EditorStore {
      *  changes land on files nobody's mid-edit in). */
     private handleExternalChange(paths: string[]): void {
         if (paths.length === 0) return;
-        const changed = new Set(paths);
+        const changed = new Set(paths.map(canonicalPathKey));
         for (const tab of this.tabs) {
-            if (tab.kind !== "text" || !changed.has(tab.path)) continue;
+            if (tab.kind !== "text" || !changed.has(canonicalPathKey(tab.path))) continue;
             if (tab.isDirty) {
                 tab.changedOnDisk = true;
                 continue;
@@ -250,7 +258,13 @@ class EditorStore {
     async open(path: string): Promise<void> {
         const existing = this.findTab(path);
         if (existing) {
-            this.activePath = path;
+            // Reuse the tab's own (already-canonical) path string, not the
+            // possibly differently-cased/separated `path` we were just
+            // asked to open — keeps `activePath` exactly equal to some
+            // `tab.path` by reference value, which every `t.path ===
+            // this.activePath` check elsewhere in this store (and
+            // Breadcrumbs.svelte) relies on.
+            this.activePath = existing.path;
             return;
         }
 
@@ -331,8 +345,18 @@ class EditorStore {
         // too, before Svelte's reactivity has actually flushed, would risk
         // landing before that tab-swap `setState` and then being clobbered by
         // it (setState replaces the selection along with everything else).
-        const alreadyActive = this.activePath === path && this.findTab(path) !== undefined;
-        this.pendingReveal = { path, line, colStart, colEnd };
+        // Resolved *before* `open()` runs, and against the same tab lookup
+        // `open()` itself will use — `path` here may be a differently-cased
+        // /separated string for a file that's already open (see
+        // `findTab`'s doc comment), in which case `open()` will resolve
+        // `activePath` to the tab's own canonical path, not this one, so
+        // `pendingReveal` needs to match that canonical form too or
+        // `applyPendingReveal`'s `target.path !== this.activePath` guard
+        // would never match.
+        const existing = this.findTab(path);
+        const canonicalPath = existing?.path ?? path;
+        const alreadyActive = existing !== undefined && pathsEqual(this.activePath ?? "", path);
+        this.pendingReveal = { path: canonicalPath, line, colStart, colEnd };
         await this.open(path);
         if (alreadyActive && this.activeView) {
             this.applyPendingReveal(this.activeView);
@@ -462,15 +486,22 @@ class EditorStore {
         const tab = this.findTab(path);
         if (!tab?.cmState || changes.length === 0) return;
 
-        if (path === this.activePath && this.activeView) {
+        // Compares `tab.path` (the tab's own canonical path), not the raw
+        // `path` argument — a workspace-edit's path came from a language
+        // server and isn't guaranteed to match `activePath`'s exact casing
+        // even when it does refer to the active tab (see `findTab`'s doc
+        // comment). Using the tab's own path keeps this in the fast,
+        // real-`dispatch` branch instead of silently falling back to the
+        // slower "inactive tab" one for what's actually the visible file.
+        if (tab.path === this.activePath && this.activeView) {
             this.activeView.dispatch({ changes });
             return;
         }
 
         const nextState = tab.cmState.update({ changes }).state;
         tab.cmState = nextState;
-        this.markDirty(path);
-        this.scheduleLspChange(path);
+        this.markDirty(tab.path);
+        this.scheduleLspChange(tab.path);
     }
 
     /** Fire-and-forget notifications to the LSP backend — errors are logged,

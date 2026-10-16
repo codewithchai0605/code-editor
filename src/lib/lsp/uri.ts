@@ -1,3 +1,5 @@
+import { canonicalPathKey } from "$lib/utils/path";
+
 /** Converts a filesystem path (as returned by the Rust fs commands,
  *  possibly backslash-separated on Windows) to a `file://` URI matching
  *  what `lsp_types::Uri` parses on the Rust side. */
@@ -31,4 +33,15 @@ export function fileUriToPath(uri: string): string {
         path = withoutScheme;
     }
     return /^\/[a-zA-Z]:\//.test(path) ? path.slice(1) : path;
+}
+
+/** Canonical string key for a `file://` URI, for use as a `Map`/cache key
+ *  (diagnostics, anything else keyed by "which file is this about") —
+ *  never hand this back to an LSP request, it's a lookup key, not a valid
+ *  URI. Two URIs naming the same file always produce the same key even if
+ *  a server returned one with different drive-letter case or separators
+ *  than this app used when it opened the file — see `canonicalPathKey`
+ *  (`$lib/utils/path`) for why that happens. */
+export function normalizeUriKey(uri: string): string {
+    return canonicalPathKey(fileUriToPath(uri));
 }

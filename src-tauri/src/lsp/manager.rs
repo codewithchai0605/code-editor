@@ -121,8 +121,8 @@ fn client_capabilities() -> ClientCapabilities {
     }
 }
 
-/// Resolves a command name (e.g. "typescript-language-server") to the
-/// real executable to run — checked in order: (1) whether this app
+/// Resolves a `ServerConfig`'s `command` (e.g.
+/// "typescript-language-server") to the real executable to run — checked in order: (1) whether this app
 /// previously auto-installed it (`installer::installed_binary_path`,
 /// which always wins when present, so an app-managed install can never
 /// be shadowed by something stale on PATH), (2) PATH via `which`,
@@ -149,14 +149,71 @@ fn client_capabilities() -> ClientCapabilities {
 /// — trusted-but-reviewable input, the same trust level as any other
 /// project-local config file that can run commands (compare a repo's
 /// `package.json` scripts or `.vscode/tasks.json`).
-fn resolve_program(app: &AppHandle, language_id: &str, name: &str) -> String {
-    if let Some(installed) = crate::lsp::installer::installed_binary_path(app, language_id, name) {
+fn resolve_program(app: &AppHandle, language_id: &str, config: &ServerConfig) -> String {
+    if let Some(installed) = crate::lsp::installer::installed_binary_path(app, language_id, config)
+    {
         return installed.to_string_lossy().into_owned();
     }
-    which::which(name)
+    which::which(&config.command)
         .ok()
         .and_then(|p| p.to_str().map(str::to_owned))
-        .unwrap_or_else(|| name.to_string())
+        .unwrap_or_else(|| config.command.clone())
+}
+
+/// `config.initialization_options`, merged with a dynamically-computed
+/// `tsserver.fallbackPath` when this is TypeScript's "classic" variant
+/// and this app has its own bundled copy of TypeScript already installed
+/// (see `installer::bundled_typescript_lib_dir`) — so a project with no
+/// `node_modules` of its own still gets a working TypeScript/JS language
+/// service, the same as VS Code's own "falling back to bundled TypeScript
+/// version" behavior, rather than typescript-language-server's hard
+/// failure when neither the workspace nor a `tsserver.path`/
+/// `fallbackPath` gives it anywhere to look.
+///
+/// Deliberately merged into `tsserver.fallbackPath`, never `tsserver.path`
+/// — `path` always wins over the workspace's own TypeScript, which would
+/// mean a project pinning a specific TypeScript version silently stops
+/// using it; `fallbackPath` is only ever consulted when the workspace has
+/// none of its own (see typescript-language-server's README, "source:
+/// workspace | user-setting | bundled" — this keeps `workspace` winning).
+/// Never overwrites a `tsserver.fallbackPath` the user already configured
+/// by hand.
+///
+/// Computed here, at spawn time, rather than baked into `registry.rs`'s
+/// persisted `initializationOptions` — that JSON is meant to be a
+/// portable, user-editable file, whereas this app's own install location
+/// is an environment-specific detail that would silently be wrong on a
+/// different machine or after a reinstall.
+fn build_initialization_options(
+    app: &AppHandle,
+    language_id: &str,
+    config: &ServerConfig,
+) -> Option<Value> {
+    if language_id != "typescript" || config.command != "typescript-language-server" {
+        return config.initialization_options.clone();
+    }
+    let Some(lib_dir) = installer::bundled_typescript_lib_dir(app, language_id, config) else {
+        return config.initialization_options.clone();
+    };
+
+    let mut options = config
+        .initialization_options
+        .clone()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let Value::Object(ref mut map) = options else {
+        // A hand-edited config replaced `initializationOptions` with
+        // something that isn't even an object — nothing sane to merge
+        // into, so leave it exactly as the user wrote it.
+        return Some(options);
+    };
+    if let Value::Object(ref mut tsserver_map) =
+        map.entry("tsserver").or_insert_with(|| serde_json::json!({}))
+    {
+        tsserver_map
+            .entry("fallbackPath")
+            .or_insert_with(|| Value::String(lib_dir.to_string_lossy().into_owned()));
+    }
+    Some(options)
 }
 
 /// Identifies one running server instance: a language on a specific
@@ -492,7 +549,7 @@ impl LspManager {
         config: ServerConfig,
         root: &Path,
     ) -> Result<(), String> {
-        let program = resolve_program(app, &key.language_id, &config.command);
+        let program = resolve_program(app, &key.language_id, &config);
         let mut cmd = Command::new(&program);
         cmd.args(&config.args);
         cmd.current_dir(root);
@@ -656,7 +713,7 @@ impl LspManager {
                 name: "workspace".to_string(),
             }]),
             capabilities: client_capabilities(),
-            initialization_options: config.initialization_options.clone(),
+            initialization_options: build_initialization_options(app, &key.language_id, &config),
             ..Default::default()
         };
 
@@ -1183,12 +1240,27 @@ impl LspManager {
             .await
     }
 
+    /// `verbosity_level` is TypeScript's own non-standard extension to
+    /// `textDocument/hover` (mirroring VS Code's experimental
+    /// "Expandable Hover" — the `+`/`-` control that expands a bare
+    /// `interface Foo` hover into its full member list), supported by
+    /// typescript-language-server (>=5.3.0) talking to TypeScript's own
+    /// tsserver (>=5.9) — not part of the LSP spec, and other servers
+    /// simply ignore an extra field they don't recognize. `HoverParams`
+    /// itself (a `lsp_types` spec-generated struct) has no room for it,
+    /// so this flattens it into a plain JSON object by hand rather than
+    /// widening that type with a vendor-specific field. The response is
+    /// already passed through as raw JSON (see this module's doc
+    /// comment), so a server's extra `canIncreaseVerbosityLevel`/
+    /// `canDecreaseVerbosityLevel` fields on the way back need no
+    /// special handling here — they just ride along.
     pub async fn hover(
         &self,
         root: &Path,
         language_id: &str,
         uri: &str,
         position: Position,
+        verbosity_level: Option<i32>,
     ) -> Result<Value, String> {
         let params = HoverParams {
             text_document_position_params: TextDocumentPositionParams::new(
@@ -1199,7 +1271,18 @@ impl LspManager {
             ),
             work_done_progress_params: WorkDoneProgressParams::default(),
         };
-        self.send_request(root, language_id, "textDocument/hover", params)
+
+        let Some(level) = verbosity_level else {
+            return self
+                .send_request(root, language_id, "textDocument/hover", params)
+                .await;
+        };
+
+        let mut value = serde_json::to_value(params).map_err(|e| e.to_string())?;
+        if let Value::Object(ref mut map) = value {
+            map.insert("verbosityLevel".to_string(), serde_json::json!(level));
+        }
+        self.send_request(root, language_id, "textDocument/hover", value)
             .await
     }
 
