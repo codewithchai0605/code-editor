@@ -2,7 +2,8 @@ import { linter, type Diagnostic as CmDiagnostic } from "@codemirror/lint";
 import type { Extension } from "@codemirror/state";
 import type { LspDiagnostic } from "./types";
 import { posToOffset } from "./position";
-import { normalizeUriKey } from "./uri";
+import { normalizeUriKey, fileUriToPath } from "./uri";
+import { problemsStore, toProblemEntries } from "$lib/stores/problems.svelte";
 
 /** uri -> latest diagnostics for that file. A plain module-level Map, not
  *  Svelte `$state` — what needs to observe this is CodeMirror's own
@@ -18,11 +19,21 @@ import { normalizeUriKey } from "./uri";
 const cache = new Map<string, LspDiagnostic[]>();
 
 export function setDiagnosticsForUri(uri: string, diagnostics: LspDiagnostic[]): void {
-    cache.set(normalizeUriKey(uri), diagnostics);
+    const key = normalizeUriKey(uri);
+    cache.set(key, diagnostics);
+    // Mirror into the reactive Problems-panel store (Phase 4). Dynamic-ish
+    // coupling avoided by importing the store directly — problems.svelte.ts
+    // deliberately imports nothing from this module, so no cycle exists.
+    problemsStore.sync(
+        key,
+        toProblemEntries(uri, fileUriToPath(uri), diagnostics),
+    );
 }
 
 export function clearDiagnosticsForUri(uri: string): void {
-    cache.delete(normalizeUriKey(uri));
+    const key = normalizeUriKey(uri);
+    cache.delete(key);
+    problemsStore.removeFile(key);
 }
 
 /** Synchronous read of the current cache — used by `codeAction.ts` to

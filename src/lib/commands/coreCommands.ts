@@ -4,7 +4,17 @@ import { workspace } from "$lib/stores/workspace.svelte";
 import { editorStore } from "$lib/stores/editor.svelte";
 import { paletteState } from "$lib/stores/palette.svelte";
 import { markdownPreviewStore } from "$lib/stores/markdownPreview.svelte";
-import { moveLineUp, moveLineDown, copyLineUp, copyLineDown } from "@codemirror/commands";
+import {
+    moveLineUp,
+    moveLineDown,
+    copyLineUp,
+    copyLineDown,
+    toggleComment,
+    deleteLine,
+    joinLines,
+    foldAll,
+    unfoldAll,
+} from "@codemirror/commands";
 import { selectNextOccurrence } from "@codemirror/search";
 import { goToNextGitChange, goToPreviousGitChange } from "$lib/editor/git-gutter";
 import type { EditorView } from "@codemirror/view";
@@ -247,6 +257,83 @@ export function registerCoreCommands(): () => void {
             id: "lsp.stopAllServers",
             title: "LSP: Stop All Servers",
             run: () => void lspStore.stopAllServers(),
+        }),
+        // --- VS Code parity commands (Phases 1–2) ---
+        commandRegistry.register({
+            id: "editor.toggleComment",
+            title: "Toggle Line Comment",
+            keybinding: "Ctrl+/",
+            run: onActiveView(toggleComment),
+        }),
+        commandRegistry.register({
+            id: "editor.deleteLine",
+            title: "Line: Delete",
+            keybinding: "Ctrl+Shift+K",
+            run: onActiveView(deleteLine),
+        }),
+        commandRegistry.register({
+            id: "editor.joinLines",
+            title: "Join Lines",
+            keybinding: "Ctrl+J",
+            run: onActiveView(joinLines),
+        }),
+        commandRegistry.register({
+            id: "editor.selectAllOccurrences",
+            title: "Selection: Select All Occurrences",
+            keybinding: "Ctrl+Shift+L",
+            run(view) {
+                const { state } = view;
+                const sel = state.selection.main;
+                const query = sel.empty
+                    ? state.wordAt(sel.head)?.sliceString(state.doc) ?? ""
+                    : state.sliceDoc(sel.from, sel.to);
+                if (!query) return false;
+                const ranges: { from: number; to: number }[] = [];
+                const re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
+                const text = state.doc.sliceString(0, state.doc.length);
+                let m: RegExpExecArray | null;
+                while ((m = re.exec(text)) !== null) {
+                    ranges.push({ from: m.index, to: m.index + m[0].length });
+                    if (m[0].length === 0) re.lastIndex++;
+                }
+                if (ranges.length === 0) return false;
+                view.dispatch({
+                    selections: ranges.map((r) => ({ anchor: r.from, head: r.to })),
+                });
+                return true;
+            },
+        }),
+        commandRegistry.register({
+            id: "editor.foldAll",
+            title: "Fold All",
+            keybinding: "Ctrl+K Ctrl+1",
+            run: onActiveView(foldAll),
+        }),
+        commandRegistry.register({
+            id: "editor.unfoldAll",
+            title: "Unfold All",
+            keybinding: "Ctrl+K Ctrl+0",
+            run: onActiveView(unfoldAll),
+        }),
+        commandRegistry.register({
+            id: "explorer.revealActiveFile",
+            title: "Explorer: Reveal Active File",
+            run: () => {
+                const tab = editorStore.activeTab;
+                if (tab && tab.kind === "text") {
+                    void workspace.revealInExplorer(tab.path);
+                }
+            },
+        }),
+        commandRegistry.register({
+            id: "explorer.toggleAutoReveal",
+            title: "Explorer: Toggle Auto Reveal",
+            run: () => {
+                editorStore.autoReveal = !editorStore.autoReveal;
+                toastStore.info(
+                    `Explorer auto-reveal ${editorStore.autoReveal ? "enabled" : "disabled"}`,
+                );
+            },
         }),
     ];
 

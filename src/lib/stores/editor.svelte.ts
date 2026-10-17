@@ -139,7 +139,41 @@ class EditorStore {
 
     private fsListenerStarted = false;
 
+    /** VS Code's `explorer.autoReveal` equivalent — when on (the default),
+     *  activating a text tab expands + selects its location in the Explorer
+     *  tree. Read reactively inside the `$effect` below via
+     *  `editorStore.autoReveal`, so toggling the command takes effect for
+     *  subsequent tab switches without any restart. */
+    autoReveal = $state(true);
+
+    /** Scroll the Explorer tree so the row for `path` is visible, if it's
+     *  rendered (it won't be until revealInExplorer has finished expanding
+     *  its ancestors — Svelte re-renders first, then this runs). Waits one
+     *  microtask + animation frame so it lands after that render. */
+    private scrollExplorerTo(path: string): void {
+        queueMicrotask(() => {
+            requestAnimationFrame(() => {
+                const el = document.querySelector(`[data-tree-path="${CSS.escape(path)}"]`);
+                el?.scrollIntoView({ block: "nearest" });
+            });
+        });
+    }
+
     constructor() {
+        // VS Code-style auto-reveal: whenever a different text tab becomes
+        // active (and the toggle is on), expand + select its location in
+        // the Explorer tree and scroll it into view. `$effect` lives here
+        // rather than in a component so it runs exactly once for the store's
+        // lifetime; it tracks `activePath` + `autoReveal` reactively.
+        $effect(() => {
+            const path = this.activePath;
+            const enabled = this.autoReveal;
+            if (!path || !enabled) return;
+            const tab = this.findTab(path);
+            if (!tab || tab.kind !== "text") return;
+            void workspace.revealInExplorer(path).then(() => this.scrollExplorerTo(path));
+        });
+
         // Keeps every open file's dirty-diff gutter pointed at the right
         // baseline: staging, unstaging, committing, or an external change to
         // the index (branch switch, pull, ...) all move what an "unchanged"

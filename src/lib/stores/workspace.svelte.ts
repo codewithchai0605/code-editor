@@ -11,7 +11,7 @@ import {
     movePaths,
 } from "$lib/api/fs";
 import { isFsError, type FsChangedPayload, type FsEntry } from "$lib/types/fs";
-import { baseName, parentOf } from "$lib/utils/path";
+import { baseName, parentOf, isPathUnder } from "$lib/utils/path";
 import { describeFsError } from "$lib/utils/fsError";
 import { takePendingOpenPath } from "$lib/api/nativeIntegration";
 import { gitStore } from "./git.svelte";
@@ -186,6 +186,47 @@ class WorkspaceState {
         } catch (err) {
             this.dirs.set(entry.path, { children: [], loading: false });
             this.lastError = describeFsError(err);
+        }
+    }
+
+    /** VS Code's "Reveal in Explorer" / auto-reveal behavior: expand every
+     *  ancestor directory of `path` (lazily fetching listings as needed)
+     *  and select the file itself, so the tree visibly shows what the user
+     *  is editing. Called from editor.svelte.ts whenever a text tab becomes
+     *  active (see `autoReveal` below). Best-effort: a directory that fails
+     *  to list (deleted, permissions) just stops the descent there rather
+     *  than surfacing an error — this is a convenience, not an operation
+     *  the user explicitly asked for. */
+    async revealInExplorer(path: string): Promise<void> {
+        const root = this.rootPath;
+        if (!root || !isPathUnder(root, path)) return;
+
+        const rest = path.slice(root.length).replace(/^[\\/]+/, "");
+        const parts = rest.split(/[\\/]+/).filter(Boolean);
+        let current = root;
+        // Walk every ancestor *folder* (all segments but the last, which
+        // is the file being revealed), expanding + ensuring each is loaded.
+        for (let i = 0; i < parts.length - 1; i++) {
+            current = `${current}${current.endsWith("/") || current.endsWith("\\") ? "" : "/"}${parts[i]}`;
+            this.expanded.add(current);
+            await this.ensureLoaded(current);
+        }
+        this.select(path);
+    }
+
+    /** Fetches `dir`'s children unless already fetched or in flight — the
+     *  same lazy-load contract `toggleExpand` implements, factored out so
+     *  `revealInExplorer` can reuse it without simulating a click. */
+    private async ensureLoaded(dir: string): Promise<void> {
+        if (this.dirs.has(dir)) return;
+        this.dirs.set(dir, { children: [], loading: true });
+        try {
+            const entries = await readDir(dir);
+            this.dirs.set(dir, { children: entries, loading: false });
+        } catch {
+            // Unreadable/deleted mid-reveal — leave an empty listing; the
+            // fs watcher will refresh it if something legitimate changes.
+            this.dirs.set(dir, { children: [], loading: false });
         }
     }
 
