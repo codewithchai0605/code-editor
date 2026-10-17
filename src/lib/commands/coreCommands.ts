@@ -11,11 +11,10 @@ import {
     copyLineDown,
     toggleComment,
     deleteLine,
-    joinLines,
-    foldAll,
-    unfoldAll,
 } from "@codemirror/commands";
+import { foldAll, unfoldAll } from "@codemirror/language";
 import { selectNextOccurrence } from "@codemirror/search";
+import { EditorSelection } from "@codemirror/state";
 import { goToNextGitChange, goToPreviousGitChange } from "$lib/editor/git-gutter";
 import type { EditorView } from "@codemirror/view";
 import { lspStore } from "$lib/lsp/manager.svelte";
@@ -34,6 +33,15 @@ import { registerFolderContextMenu, unregisterFolderContextMenu } from "$lib/api
 function onActiveView(run: (view: EditorView) => boolean) {
     return () => {
         if (editorStore.view) run(editorStore.view);
+    };
+}
+
+/** Like `onActiveView`, but for commands that perform async work against
+ *  the active editor (LSP requests, palette-driven actions). The registry's
+ *  `run` signature accepts promises, so we can forward them directly. */
+function onActiveViewAsync(run: (view: EditorView) => void | Promise<void>) {
+    return () => {
+        if (editorStore.view) return run(editorStore.view);
     };
 }
 
@@ -275,18 +283,36 @@ export function registerCoreCommands(): () => void {
             id: "editor.joinLines",
             title: "Join Lines",
             keybinding: "Ctrl+J",
-            run: onActiveView(joinLines),
+            run: onActiveView((view) => {
+                const { state } = view;
+                const result = state.changeByRange((range) => {
+                    const line = state.doc.lineAt(range.head);
+                    const next = state.doc.lineAt(Math.min(line.to + 1, state.doc.length));
+                    if (next.number === line.number) return { range };
+                    // Join the two lines, replacing the leading whitespace of the
+                    // next line with a single space.
+                    const from = line.to;
+                    const to = next.from + /^\s*/.exec(next.text)![0].length;
+                    const insert = from === to ? " " : "";
+                    return {
+                        changes: { from, to, insert },
+                        range: EditorSelection.cursor(from + insert.length),
+                    };
+                });
+                if (!result.changes.length) return false;
+                view.dispatch(result);
+                return true;
+            }),
         }),
         commandRegistry.register({
             id: "editor.selectAllOccurrences",
             title: "Selection: Select All Occurrences",
             keybinding: "Ctrl+Shift+L",
-            run(view) {
+            run: onActiveView((view) => {
                 const { state } = view;
                 const sel = state.selection.main;
-                const query = sel.empty
-                    ? state.wordAt(sel.head)?.sliceString(state.doc) ?? ""
-                    : state.sliceDoc(sel.from, sel.to);
+                const w = state.wordAt(sel.head);
+                const query = sel.empty ? (w ? state.sliceDoc(w.from, w.to) : "") : state.sliceDoc(sel.from, sel.to);
                 if (!query) return false;
                 const ranges: { from: number; to: number }[] = [];
                 const re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
@@ -298,10 +324,12 @@ export function registerCoreCommands(): () => void {
                 }
                 if (ranges.length === 0) return false;
                 view.dispatch({
-                    selections: ranges.map((r) => ({ anchor: r.from, head: r.to })),
+                    selection: EditorSelection.create(
+                        ranges.map((r) => EditorSelection.range(r.from, r.to)),
+                    ),
                 });
                 return true;
-            },
+            }),
         }),
         commandRegistry.register({
             id: "editor.foldAll",

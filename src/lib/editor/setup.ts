@@ -1,4 +1,4 @@
-import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, EditorSelection, type Extension } from "@codemirror/state";
 import {
     keymap,
     lineNumbers,
@@ -21,17 +21,15 @@ import {
     copyLineDown,
     toggleComment,
     deleteLine,
-    joinLines,
     selectLine,
-    foldAll,
-    unfoldAll,
 } from "@codemirror/commands";
 import {
     indentOnInput,
     bracketMatching,
     foldGutter,
     foldKeymap,
-    lineAt,
+    foldAll,
+    unfoldAll,
 } from "@codemirror/language";
 import {
     searchKeymap,
@@ -210,9 +208,8 @@ export function baseExtensions(
                 run(view) {
                     const { state } = view;
                     const sel = state.selection.main;
-                    const query = sel.empty
-                        ? state.wordAt(sel.head)?.sliceString(state.doc) ?? ""
-                        : state.sliceDoc(sel.from, sel.to);
+                    const w = state.wordAt(sel.head);
+                    const query = sel.empty ? (w ? state.sliceDoc(w.from, w.to) : "") : state.sliceDoc(sel.from, sel.to);
                     if (!query) return false;
                     const ranges: { from: number; to: number }[] = [];
                     const re = new RegExp(
@@ -227,7 +224,9 @@ export function baseExtensions(
                     }
                     if (ranges.length === 0) return false;
                     view.dispatch({
-                        selections: ranges.map((r) => ({ anchor: r.from, head: r.to })),
+                        selection: EditorSelection.create(
+                            ranges.map((r) => EditorSelection.range(r.from, r.to)),
+                        ),
                     });
                     return true;
                 },
@@ -241,8 +240,8 @@ export function baseExtensions(
                     const sel = state.selection.main;
                     if (sel.empty) return false;
                     const needle = state.sliceDoc(sel.from, sel.to);
-                    const first = lineAt(state.doc, sel.from).number;
-                    const last = lineAt(state.doc, Math.max(sel.from, sel.to - 1)).number;
+                    const first = state.doc.lineAt(sel.from).number;
+                    const last = state.doc.lineAt(Math.max(sel.from, sel.to - 1)).number;
                     const kept: string[] = [];
                     for (let n = first; n <= last; n++) {
                         const line = state.doc.line(n);
@@ -261,7 +260,29 @@ export function baseExtensions(
             },
             // Mod-Shift-K / Mod-Shift-J: delete and join lines, as in VS Code.
             { key: "Mod-Shift-k", preventDefault: true, run: deleteLine },
-            { key: "Mod-j", preventDefault: true, run: joinLines },
+            {
+                key: "Mod-j",
+                preventDefault: true,
+                run(view) {
+                    const { state } = view;
+                    const result = state.changeByRange((range) => {
+                        const line = state.doc.lineAt(range.head);
+                        if (line.number === state.doc.lines) return { range };
+                        const next = state.doc.line(line.number + 1);
+                        // Join the two lines, replacing the next line's leading
+                        // whitespace with a single space.
+                        const to = next.from + /^\s*/.exec(next.text)![0].length;
+                        const insert = to === next.from ? " " : "";
+                        return {
+                            changes: { from: line.to, to, insert },
+                            range: EditorSelection.cursor(line.to + insert.length),
+                        };
+                    });
+                    if (!result.changes.length) return false;
+                    view.dispatch(result);
+                    return true;
+                },
+            },
             // Mod-Shift-i: place a cursor at the end of every selected line.
             { key: "Mod-Shift-i", preventDefault: true, run: selectLine },
             // Mod-K Mod-0 / Mod-K Mod-1: fold everything / unfold everything.
