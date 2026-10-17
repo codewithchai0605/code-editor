@@ -34,6 +34,12 @@ export interface SearchMatch {
     colStart: number;
     colEnd: number;
     lineText: string;
+    /** UTF-16 code unit offset of `lineText`'s first character within the
+     *  *full* source line. 0 unless the backend windowed down an over-long
+     *  line (see search.rs's `windowed_line`) — in that case the columns
+     *  above are relative to this window, and adding this offset converts
+     *  them back to real document columns. */
+    lineTextOffset: number;
 }
 
 export interface FileSearchResult {

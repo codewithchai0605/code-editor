@@ -97,6 +97,21 @@ class LspStore {
         return best ?? fallbackRoot;
     }
 
+    /** Whether a *detected project* covers `path` for ANY language — i.e.
+     *  some root marker (package.json / Cargo.toml / go.mod / …) matched
+     *  somewhere up the tree during `startForWorkspace`. Used by
+     *  editor.svelte.ts's lightweight-LSP gate (see `shouldStartServer`):
+     *  opening a stray `.html`/`.css` file in an otherwise bare folder
+     *  shouldn't drag a whole Node-based server along for one document
+     *  when CodeMirror's built-in mode already highlights it fine, but the
+     *  moment the folder IS a real project, the servers earn their keep.
+     *  Note this deliberately does NOT require the covering root to match
+     *  the file's own language — a plain static site inside a repo with a
+     *  `package.json` elsewhere is still a project worth full features. */
+    hasProjectRootFor(path: string): boolean {
+        return this.roots.some((candidate) => isPathUnder(candidate.root, path));
+    }
+
     /** Starts (or reuses) the server configured for `languageId` in `root`.
      *  Called lazily from editor.svelte.ts right before a file of that
      *  language is opened — not eagerly for the whole workspace, since most

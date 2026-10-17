@@ -19,8 +19,20 @@ import {
     moveLineDown,
     copyLineUp,
     copyLineDown,
+    toggleComment,
+    deleteLine,
+    joinLines,
+    selectLine,
+    foldAll,
+    unfoldAll,
 } from "@codemirror/commands";
-import { indentOnInput, bracketMatching, foldGutter, foldKeymap } from "@codemirror/language";
+import {
+    indentOnInput,
+    bracketMatching,
+    foldGutter,
+    foldKeymap,
+    lineAt,
+} from "@codemirror/language";
 import {
     searchKeymap,
     highlightSelectionMatches,
@@ -54,6 +66,7 @@ import { lspDefinitionHandler, lspGoToDefinitionCommand } from "$lib/lsp/definit
 import { lspRenameCommand, lspRenameExtension } from "$lib/lsp/rename";
 import { lspCodeActionCommand } from "$lib/lsp/code-action";
 import { editorContextMenu } from "./context-menu";
+import { revealHighlightExtension } from "./reveal-highlight";
 
 /**
  * Holds the theme's CodeMirror extension (chrome + syntax highlighting)
@@ -158,6 +171,7 @@ export function baseExtensions(
         tagAutoRename(),
         indentationFolding,
         colorChips(),
+        revealHighlightExtension(),
         lintGutter(),
         themeCompartment.of(buildCmTheme(initialTheme)),
         ...(filePath
@@ -182,6 +196,75 @@ export function baseExtensions(
             },
             { key: "Mod-f", run: openSearchPanel },
             { key: "Mod-d", run: selectNextOccurrence },
+            // --- VS Code parity keybindings (Phase 2) ---
+            // Mod-/ toggles line or block comment depending on selection.
+            { key: "Mod-slash", preventDefault: true, run: toggleComment },
+            // Mod-Shift-L: select every occurrence of the current selection
+            // (or the word under an empty cursor), like VS Code's
+            // "Select All Occurrences of Find Match".
+            {
+                key: "Mod-Shift-l",
+                preventDefault: true,
+                run(view) {
+                    const { state } = view;
+                    const sel = state.selection.main;
+                    const query = sel.empty
+                        ? state.wordAt(sel.head)?.sliceString(state.doc) ?? ""
+                        : state.sliceDoc(sel.from, sel.to);
+                    if (!query) return false;
+                    const ranges: { from: number; to: number }[] = [];
+                    const re = new RegExp(
+                        query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+                        "g",
+                    );
+                    const text = state.doc.sliceString(0, state.doc.length);
+                    let m: RegExpExecArray | null;
+                    while ((m = re.exec(text)) !== null) {
+                        ranges.push({ from: m.index, to: m.index + m[0].length });
+                        if (m[0].length === 0) re.lastIndex++;
+                    }
+                    if (ranges.length === 0) return false;
+                    view.dispatch({
+                        selections: ranges.map((r) => ({ anchor: r.from, head: r.to })),
+                    });
+                    return true;
+                },
+            },
+            // Shift-Alt-K: keep only the lines matching the current selection.
+            {
+                key: "Shift-Alt-k",
+                preventDefault: true,
+                run(view) {
+                    const { state } = view;
+                    const sel = state.selection.main;
+                    if (sel.empty) return false;
+                    const needle = state.sliceDoc(sel.from, sel.to);
+                    const first = lineAt(state.doc, sel.from).number;
+                    const last = lineAt(state.doc, Math.max(sel.from, sel.to - 1)).number;
+                    const kept: string[] = [];
+                    for (let n = first; n <= last; n++) {
+                        const line = state.doc.line(n);
+                        if (line.text.includes(needle)) kept.push(line.text);
+                    }
+                    if (kept.length === 0) return false;
+                    view.dispatch({
+                        changes: {
+                            from: state.doc.line(first).from,
+                            to: last < state.doc.lines ? state.doc.line(last + 1).from : state.doc.length,
+                            insert: kept.join("\n") + "\n",
+                        },
+                    });
+                    return true;
+                },
+            },
+            // Mod-Shift-K / Mod-Shift-J: delete and join lines, as in VS Code.
+            { key: "Mod-Shift-k", preventDefault: true, run: deleteLine },
+            { key: "Mod-j", preventDefault: true, run: joinLines },
+            // Mod-Shift-i: place a cursor at the end of every selected line.
+            { key: "Mod-Shift-i", preventDefault: true, run: selectLine },
+            // Mod-K Mod-0 / Mod-K Mod-1: fold everything / unfold everything.
+            { key: "Mod-k Mod-0", preventDefault: true, run: unfoldAll },
+            { key: "Mod-k Mod-1", preventDefault: true, run: foldAll },
             { key: "Alt-F3", run: goToNextGitChange },
             { key: "Shift-Alt-F3", run: goToPreviousGitChange },
             { key: "Alt-ArrowUp", run: moveLineUp },

@@ -39,15 +39,17 @@ use crate::lsp::project_scanner;
 use crate::lsp::protocol::{read_message, write_message};
 use crate::lsp::registry::{self, ServerConfig};
 use lsp_types::{
-    ClientCapabilities, CodeActionContext, CodeActionParams, CompletionParams, Diagnostic,
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentFormattingParams, DocumentSymbolParams, ExecuteCommandParams, FormattingOptions,
-    GotoDefinitionParams, HoverClientCapabilities, HoverParams, InitializeParams,
-    InitializedParams, MarkupKind, PartialResultParams, Position, Range, ReferenceContext,
-    ReferenceParams, RenameParams, SignatureHelpParams, TextDocumentClientCapabilities,
+    ClientCapabilities, CodeActionContext, CodeActionParams, CompletionClientCapabilities,
+    CompletionItemKind, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
+    DocumentSymbolClientCapabilities, DocumentSymbolParams, ExecuteCommandParams,
+    FormattingOptions, GotoDefinitionClientCapabilities, GotoDefinitionParams, HoverClientCapabilities,
+    HoverParams, InitializeParams, InitializedParams, MarkupKind, PartialResultParams, Position,
+    Range, ReferenceContext, ReferenceParams, RenameClientCapabilities, RenameParams,
+    SignatureHelpClientCapabilities, SignatureHelpParams, TextDocumentClientCapabilities,
     TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
     TextDocumentPositionParams, Uri, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
-    WorkspaceFolder, WorkspaceSymbolParams,
+    WorkspaceClientCapabilities, WorkspaceFolder, WorkspaceSymbolParams,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -94,26 +96,152 @@ const AUTO_RESTART_BACKOFFS: [Duration; 5] = [
     Duration::from_secs(16),
 ];
 
-/// This client's declared `ClientCapabilities` — deliberately minimal
-/// (mostly `None`/default) rather than an attempt to advertise everything
-/// this integration *sort of* handles: over-claiming a capability this
-/// client doesn't actually honor (e.g. `workspace.configuration`, which
-/// would commit to answering `workspace/configuration` requests — see
-/// `route_message`'s doc comment on why server-to-client requests are
-/// still intentionally dropped) tends to make servers behave *worse*,
-/// not better, by relying on a round-trip that never comes.
+/// This client's declared `ClientCapabilities`. Still deliberately
+/// conservative — it advertises only what this integration genuinely
+/// honors end-to-end (the frontend in `src/lib/lsp/*` really renders
+/// completions/hover/definitions/etc., and `route_message` really accepts
+/// `textDocument/publishDiagnostics` pushes) — but no longer *minimal*:
+/// the previous near-empty declaration was a big part of why everything
+/// except typescript-language-server "worked badly or not at all." Many
+/// servers (rust-analyzer, clangd, pyright, gopls) key their behavior off
+/// these flags: with nothing advertised they fall back to degraded
+/// defaults, skip richer completion item kinds, or refuse features
+/// outright. TypeScript's server is unusually tolerant of sparse
+/// capabilities, which is exactly why it masked the problem.
 ///
-/// The one addition over an empty `ClientCapabilities::default()`:
-/// `hover.content_format`, telling the server this client can render
-/// Markdown (preferring it over plain text) — a capability with no
-/// reciprocal obligation, and one that directly improves what
-/// `lsp/hover.ts`'s syntax-highlighted renderer has to work with.
+/// Two things here deserve special mention:
+/// - `general.positionEncodings: ["utf-16"]` — without an explicit claim
+///   the negotiated encoding is ambiguous for spec-strict servers; every
+///   position this client sends/receives (CodeMirror's `changeOffset`,
+///   see src/lib/lsp/uri.ts conversions) is UTF-16 code units, so we pin
+///   that explicitly rather than hoping each server guesses the same way.
+/// - NOT claimed: `workspace.configuration`, semantic tokens, progress
+///   reporting beyond the basics, `applyEdit` round-trips via
+///   `workspace/applyEdit` requests, etc. Over-claiming a capability this
+///   client doesn't actually honor makes servers behave *worse* by
+///   relying on a round-trip that never comes.
 fn client_capabilities() -> ClientCapabilities {
     ClientCapabilities {
+        general: Some(lsp_types::GeneralClientCapabilities {
+            position_encodings: Some(vec![lsp_types::PositionEncodingKind::UTF16]),
+            ..Default::default()
+        }),
         text_document: Some(TextDocumentClientCapabilities {
+            synchronization: Some(lsp_types::TextDocumentSyncClientCapabilities {
+                // We always send full-text `didChange` content (see
+                // `did_change`), never incremental ranges — say so.
+                dynamic_registration: Some(false),
+                will_save: Some(false),
+                will_save_wait_until: Some(false),
+                did_save: Some(true),
+                ..Default::default()
+            }),
+            publish_diagnostics: Some(lsp_types::PublishDiagnosticsClientCapabilities {
+                dynamic_registration: Some(false),
+                related_information: Some(lsp_types::DiagnosticRelatedInformationCapability {
+                    tag_support: Some(lsp_types::TagSupport { value_set: vec![] }),
+                }),
+                version_support: Some(true),
+                ..Default::default()
+            }),
             hover: Some(HoverClientCapabilities {
                 dynamic_registration: None,
                 content_format: Some(vec![MarkupKind::Markdown, MarkupKind::PlainText]),
+            }),
+            completion: Some(CompletionClientCapabilities {
+                completion_item: Some(lsp_types::CompletionItemCapability {
+                    // The frontend maps every standard LSP kind onto a
+                    // CodeMirror completion type (src/lib/lsp/completion.ts).
+                    // Advertising them keeps servers from downgrading rich
+                    // items to plain text.
+                    kind: Some(lsp_types::CompletionItemCapabilityKind {
+                        value_set: Some(vec![
+                            CompletionItemKind::TEXT,
+                            CompletionItemKind::METHOD,
+                            CompletionItemKind::FUNCTION,
+                            CompletionItemKind::CONSTRUCTOR,
+                            CompletionItemKind::FIELD,
+                            CompletionItemKind::VARIABLE,
+                            CompletionItemKind::CLASS,
+                            CompletionItemKind::INTERFACE,
+                            CompletionItemKind::MODULE,
+                            CompletionItemKind::PROPERTY,
+                            CompletionItemKind::UNIT,
+                            CompletionItemKind::VALUE,
+                            CompletionItemKind::ENUM,
+                            CompletionItemKind::KEYWORD,
+                            CompletionItemKind::SNIPPET,
+                            CompletionItemKind::COLOR,
+                            CompletionItemKind::FILE,
+                            CompletionItemKind::REFERENCE,
+                            CompletionItemKind::FOLDER,
+                            CompletionItemKind::ENUM_MEMBER,
+                            CompletionItemKind::CONSTANT,
+                            CompletionItemKind::STRUCT,
+                            CompletionItemKind::EVENT,
+                            CompletionItemKind::OPERATOR,
+                        ]),
+                    }),
+                    snippet_support: Some(lsp_types::SnippetSupport { value_set: vec![1] }),
+                    documentation_format: Some(vec![MarkupKind::Markdown, MarkupKind::PlainText]),
+                    ..Default::default()
+                }),
+                context_support: Some(true),
+                ..Default::default()
+            }),
+            signature_help: Some(SignatureHelpClientCapabilities {
+                signature_information: Some(lsp_types::SignatureInformationSettings {
+                    documentation_format: Some(vec![MarkupKind::Markdown, MarkupKind::PlainText]),
+                    parameter_information_label_offset_support: None,
+                }),
+                ..Default::default()
+            }),
+            definition: Some(GotoDefinitionClientCapabilities {
+                dynamic_registration: Some(false),
+                link_support: Some(false),
+            }),
+            references: Some(lsp_types::ReferenceClientCapabilities {
+                dynamic_registration: Some(false),
+            }),
+            document_symbol: Some(DocumentSymbolClientCapabilities {
+                dynamic_registration: Some(false),
+                symbol_kind: Some(lsp_types::SymbolKindCapability {
+                    value_set: Some((1..=26).collect()),
+                }),
+                hierarchical_document_symbol_support: Some(true),
+            }),
+            formatting: Some(lsp_types::DocumentFormattingClientCapabilities {
+                dynamic_registration: Some(false),
+            }),
+            rename: Some(RenameClientCapabilities {
+                dynamic_registration: Some(false),
+                prepare_support: Some(false),
+                ranges_support: None,
+            }),
+            code_action: Some(lsp_types::CodeActionClientCapabilities {
+                code_action_literal_support: Some(lsp_types::CodeActionLiteralSupport {
+                    code_action_kind: lsp_types::CodeActionKindLiteralSupport {
+                        value_set: vec![
+                            "quickfix".into(),
+                            "refactor".into(),
+                            "source".into(),
+                        ],
+                    },
+                }),
+                is_preferred_support: Some(true),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        workspace: Some(WorkspaceClientCapabilities {
+            workspace_folders: Some(lsp_types::WorkspaceFoldersClientCapabilities {
+                supported: Some(true),
+                change_notifications: Some(true),
+            }),
+            configuration: None, // intentionally NOT claimed — see doc comment
+            apply_edit: None,    // ditto: we resolve edits client-side
+            execute_command: Some(lsp_types::ExecuteCommandClientCapabilities {
+                dynamic_registration: Some(false),
             }),
             ..Default::default()
         }),

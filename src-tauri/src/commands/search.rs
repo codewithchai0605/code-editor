@@ -115,6 +115,16 @@ pub struct SearchMatch {
     /// The source line the match was found on (windowed down for
     /// pathologically long lines — see `windowed_line`).
     pub line_text: Box<str>,
+    /// UTF-16 code unit offset of `line_text`'s first character within the
+    /// *full* source line. Always 0 unless `windowed_line` truncated an
+    /// over-long line, in which case `line_text` starts here instead of at
+    /// the line's beginning — the frontend needs this to translate a
+    /// clicked match's window-relative columns back to real document
+    /// columns (see `editor.svelte.ts`'s `applyPendingReveal`). Without it,
+    /// revealing a match on a minified/over-long line would land at the
+    /// wrong column.
+    #[serde(rename = "lineTextOffset")]
+    pub line_text_offset: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -221,12 +231,13 @@ fn utf16_offset(s: &str, byte_offset: usize) -> u32 {
 
 /// Windows a line down to `MAX_LINE_UNITS` UTF-16 code units around
 /// `[col_start, col_end)` when it's too long to ship in full, returning the
-/// (possibly-truncated) text plus offsets re-based to that window. Below the
-/// cap, the line and offsets pass through unchanged.
-fn windowed_line(line: &str, col_start: u32, col_end: u32) -> (Box<str>, u32, u32) {
+/// (possibly-truncated) text plus offsets re-based to that window and the
+/// window's own start offset within the full line. Below the cap, the line
+/// and offsets pass through unchanged (offset 0).
+fn windowed_line(line: &str, col_start: u32, col_end: u32) -> (Box<str>, u32, u32, u32) {
     let units: Vec<u16> = line.encode_utf16().collect();
     if units.len() <= MAX_LINE_UNITS {
-        return (line.into(), col_start, col_end);
+        return (line.into(), col_start, col_end, 0);
     }
 
     let start = (col_start as usize).saturating_sub(WINDOW_CONTEXT_BEFORE);
@@ -241,7 +252,7 @@ fn windowed_line(line: &str, col_start: u32, col_end: u32) -> (Box<str>, u32, u3
     let shift = start as i64 - prefix.encode_utf16().count() as i64;
     let new_start = (col_start as i64 - shift).max(0) as u32;
     let new_end = (col_end as i64 - shift).max(0) as u32;
-    (text.into_boxed_str(), new_start, new_end)
+    (text.into_boxed_str(), new_start, new_end, start as u32)
 }
 
 /// Reads and searches one file, returning `None` for anything binary,
@@ -267,12 +278,14 @@ fn search_file(path: &Path, regex: &Regex) -> Option<Box<[SearchMatch]>> {
             }
             let col_start = utf16_offset(line, m.start());
             let col_end = utf16_offset(line, m.end());
-            let (line_text, col_start, col_end) = windowed_line(line, col_start, col_end);
+            let (line_text, col_start, col_end, line_text_offset) =
+                windowed_line(line, col_start, col_end);
             matches.push(SearchMatch {
                 line: (idx + 1) as u32,
                 col_start,
                 col_end,
                 line_text,
+                line_text_offset,
             });
             per_line += 1;
             if matches.len() >= MAX_MATCHES_PER_FILE {
