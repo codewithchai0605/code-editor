@@ -16,7 +16,9 @@ import { clearDiagnosticsForUri } from "$lib/lsp/diagnostics";
 import { gitStore } from "./git.svelte";
 import { gitFileBaseline } from "$lib/api/git";
 import { setGitBaseline } from "$lib/editor/git-gutter";
-import { revealHighlight } from "$lib/editor/reveal-highlight";
+import { revealHighlight, clearRevealHighlight } from "$lib/editor/reveal-highlight";
+import { problemsStore, type ProblemEntry } from "./problems.svelte";
+import { normalizeUriKey } from "$lib/lsp/uri";
 import { lspStore } from "$lib/lsp/manager.svelte";
 import { pathsEqual, canonicalPathKey } from "$lib/utils/path";
 
@@ -132,6 +134,100 @@ class EditorStore {
      *  TextEditor.svelte. */
     suppressDirtyTracking = false;
 
+    /** Live cursor/selection summary of the active editor, for the status
+     *  bar's Ln/Col chip (VS Code parity, Phase 3). Updated by the shared
+     *  `cursorTrackingExtension` on every doc/selection change — plain
+     *  `$state` fields so StatusBar derives from them reactively without
+     *  touching the hot per-keystroke path with anything heavier. */
+    cursorLine = $state(1);
+    cursorColumn = $state(1);
+    /** Number of characters currently selected across all selections
+     *  (0 when the cursor is just blinking). */
+    selectionLength = $state(0);
+    /** Number of separate cursor ranges — >1 means multi-cursor mode. */
+    selectionCount = $state(1);
+    /** Dominant line ending across the active document ("LF"/"CRLF"), for
+     *  the status-bar EOL chip (Phase 3). Plain `$state`, refreshed by the
+     *  debounced doc-sync path only — never on the per-keystroke render. */
+    documentEol = $state("LF");
+    /** Dominant indentation style of the active document, for the
+     *  status-bar indent chip. Same refresh cadence as `documentEol`. */
+    indentLabel = $state("Spaces: 2");
+
+    /** Cheap two-pass scan over the document's lines (line breaks are
+     *  precomputed in CodeMirror's rope, so this is a single traversal).
+     *  Documents over MAX_STATS_DOC_CHARS skip the indent pass — a huge
+     *  minified file isn't worth sampling every line for a status chip. */
+    private static readonly MAX_STATS_DOC_CHARS = 500_000;
+
+    private computeDocStats(state: EditorState): void {
+        const doc = state.doc;
+        let crlf = 0;
+        let tabs = 0;
+        let spaces = 0;
+        const sampleIndent = doc.length <= EditorStore.MAX_STATS_DOC_CHARS;
+        // Text.iterLines visits every line break; "\n"-terminated slices
+        // that end with \r had CRLF line breaks.
+        if (sampleIndent) {
+            doc.iter((line) => {
+                const s = line.text.slice(0, Math.min(line.text.length, 20));
+                if (/^ *\t/.test(s)) tabs++;
+                else if (/^\s/.test(s)) spaces++;
+                return true;
+            });
+            crlf = 0;
+            let pos = 0;
+            for (let n = 1; n < doc.lines; n++) {
+                const l = doc.line(n);
+                if (l.text.endsWith("\r")) crlf++;
+            }
+            void pos;
+        } else {
+            // Only count line endings via the (O(lines), no text copy)
+            // line-break iteration when skipping the indent pass.
+            let from = 0;
+            for (let n = 1; n < doc.lines; n++) {
+                const l = doc.line(n);
+                if (l.from > from && doc.sliceString(l.to, l.to + 1) === "\r") crlf++;
+                from = l.to;
+            }
+        }
+        this.documentEol = crlf > 0 ? "CRLF" : "LF";
+        if (sampleIndent) {
+            if (tabs > 0 && tabs >= spaces) {
+                this.indentLabel = "Tab Size: 4";
+            } else if (spaces > 0) {
+                // Sample the first indented line's leading-space run.
+                outer: for (let n = 1; n <= doc.lines; n++) {
+                    const t = doc.line(n).text;
+                    const m = /^( +)\S/.exec(t);
+                    if (m) {
+                        const w = m[1].length;
+                        this.indentLabel = `Spaces: ${w <= 8 ? w : 8}`;
+                        break outer;
+                    }
+                }
+            }
+        }
+    }
+
+    /** Called by `cursorTrackingExtension` (editor/cursor-tracking.ts) via
+     *  `registerActiveView`. Reads line/column straight from the state that
+     *  changed, so it fires exactly once per user-visible cursor move no
+     *  matter which tab dispatched it — cheap enough for every keystroke. */
+    private updateCursorStats(state: EditorState): void {
+        const sel = state.selection.main;
+        const line = state.doc.lineAt(sel.head);
+        this.cursorLine = line.number;
+        // Code-unit count, matching VS Code's column counting (and LSP's
+        // default UTF-16 position encoding) rather than Unicode code points.
+        this.cursorColumn = sel.head - line.from + 1;
+        let totalSelected = 0;
+        for (const r of state.selection.ranges) totalSelected += r.to - r.from;
+        this.selectionLength = totalSelected;
+        this.selectionCount = state.selection.ranges.length;
+    }
+
     /** The live CodeMirror view, registered by TextEditor.svelte whenever a
      *  text tab is mounted. Only needed so a theme change can be pushed into
      *  the currently-visible editor immediately — see applyThemeToOpenTabs. */
@@ -186,6 +282,87 @@ class EditorStore {
 
     registerActiveView(view: EditorView | null): void {
         this.activeView = view;
+        // A fresh view (mount or tab switch) means the cursor stats from the
+        // previous editor are stale — re-seed immediately rather than waiting
+        // for the user's next keystroke to correct the status bar.
+        if (view) {
+            this.updateCursorStats(view.state);
+            this.computeDocStats(view.state);
+        }
+    }
+
+    /** Public entry point for `cursorTrackingExtension`: fires on every
+     *  doc/selection change in any open editor. Line/column is derived from
+     *  whichever state dispatched, so background-tab edits can't desync the
+     *  chip from what's actually visible — the next `registerActiveView` or
+     *  tracked update corrects it either way. */
+    reportCursorState(state: EditorState): void {
+        this.updateCursorStats(state);
+    }
+
+    /** Flat list of every known problem, sorted by file path then position
+     *  (the order ProblemsPanel shows them) — the sequence F8 walks. */
+    private orderedProblems(): ProblemEntry[] {
+        const all: ProblemEntry[] = [];
+        for (const entries of problemsStore.byFile.values()) all.push(...entries);
+        all.sort(
+            (a, b) =>
+                a.path.localeCompare(b.path) ||
+                a.line - b.line ||
+                a.column - b.column ||
+                a.severity - b.severity,
+        );
+        return all;
+    }
+
+    /** VS Code's "Go to Next/Previous Problem" (F8 / Shift-F8), also wired
+     *  to the status-bar Problems chip. Walks the flattened diagnostic list
+     *  cyclically, starting relative to the active tab's cursor when it's
+     *  itself a file with problems. Reveals via the same openAndReveal path
+     *  as workspace search (opens the file if needed, flashes the range). */
+    goToProblem(forward: boolean): boolean {
+        const problems = this.orderedProblems();
+        if (problems.length === 0) return false;
+
+        let index = -1;
+        const active = this.activeTab;
+        if (active && active.kind === "text") {
+            const key = normalizeUriKey(pathToFileUri(active.path));
+            const own = problemsStore.byFile.get(key);
+            if (own && own.length > 0) {
+                // Nearest problem in the current file to the live cursor;
+                // fall back to that file's first problem if no view is up.
+                const line = this.activeView ? this.cursorLine : 1;
+                let best = 0;
+                let bestDist = Infinity;
+                own.forEach((p, i) => {
+                    const d = Math.abs(p.line - line);
+                    if (d < bestDist) {
+                        bestDist = d;
+                        best = i;
+                    }
+                });
+                index = problems.indexOf(own[best]);
+            }
+        }
+
+        let target: ProblemEntry;
+        if (index === -1) {
+            target = forward ? problems[0] : problems[problems.length - 1];
+        } else {
+            // Same-file hops must respect direction too: `+1` from the last
+            // problem of a file naturally rolls into the next file's first.
+            const delta = forward ? 1 : -1;
+            target = problems[(index + delta + problems.length) % problems.length];
+        }
+
+        // Clear any flash left over from the previous hop before revealing
+        // the new one — rapid F8 presses should show exactly one highlight.
+        if (this.activeView) {
+            this.activeView.dispatch({ effects: clearRevealHighlight.of(null) });
+        }
+        void this.openAndReveal(target.path, target.line, 0, 0);
+        return true;
     }
 
     /** The live view behind the currently-visible text tab, if any — needed
@@ -399,6 +576,15 @@ class EditorStore {
         const existing = this.findTab(path);
         const canonicalPath = existing?.path ?? path;
         const alreadyActive = existing !== undefined && pathsEqual(this.activePath ?? "", path);
+        // Jump the status bar's Ln/Col readout to the destination up front:
+        // a brand-new tab's async file read can take a beat, and a chip that
+        // still says "Ln 1, Col 1" (or the previous file's position) during
+        // that window reads as broken navigation. The real cursor stats land
+        // via registerActiveView / applyPendingReveal's dispatch once the
+        // view exists, so this is just the optimistic placeholder.
+        this.cursorLine = line;
+        this.cursorColumn = colStart + lineTextOffset + 1;
+        this.selectionLength = Math.max(0, colEnd - colStart);
         this.pendingReveal = { path: canonicalPath, line, colStart, colEnd, lineTextOffset };
         await this.open(path);
         if (alreadyActive && this.activeView) {
@@ -462,6 +648,27 @@ class EditorStore {
     private syncDoc(path: string, state: EditorState): void {
         const tab = this.findTab(path);
         if (tab) tab.cmState = state;
+        // Status-bar EOL/indent chips (Phase 3) piggyback on the *same*
+        // debounce as LSP didChange rather than re-scanning the document
+        // every keystroke — see scheduleLspChange's timer. Only worth doing
+        // for the visible tab; a background edit refreshes its stats when it
+        // next becomes active (registerActiveView recomputes).
+        if (pathsEqual(this.activePath ?? "", path)) this.scheduleDocStats(path);
+    }
+
+    private docStatsTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+    private scheduleDocStats(path: string): void {
+        const existing = this.docStatsTimers.get(path);
+        if (existing) clearTimeout(existing);
+        const timer = setTimeout(() => {
+            this.docStatsTimers.delete(path);
+            const tab = this.findTab(path);
+            if (!tab?.cmState) return;
+            if (!pathsEqual(this.activePath ?? "", path)) return;
+            this.computeDocStats(tab.cmState);
+        }, LSP_CHANGE_DEBOUNCE_MS);
+        this.docStatsTimers.set(path, timer);
     }
 
     /** Re-fetches `path`'s git-gutter baseline (the index blob it should be

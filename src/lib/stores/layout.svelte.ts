@@ -33,6 +33,17 @@ class LayoutState {
 
     panelHeight = $state(PANEL_DEFAULT);
     panelOpen = $state(false);
+    /** Which bottom-panel view is showing. On the store (not Panel.svelte's
+     *  own state) so the status bar's Problems chip can open PROBLEMS from
+     *  outside the panel component — VS Code parity, Phase 3. */
+    panelTab = $state<"terminal" | "problems">("terminal");
+
+    /** Status-bar Problems chip click: focus the Problems view, opening the
+     *  panel if it's collapsed (VS Code's behavior for that chip). */
+    showProblems(): void {
+        this.panelTab = "problems";
+        this.panelOpen = true;
+    }
 
     activeView = $state<ActivityView>("explorer");
 

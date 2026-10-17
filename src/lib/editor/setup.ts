@@ -67,6 +67,7 @@ import { lspRenameCommand, lspRenameExtension } from "$lib/lsp/rename";
 import { lspCodeActionCommand } from "$lib/lsp/code-action";
 import { editorContextMenu } from "./context-menu";
 import { revealHighlightExtension } from "./reveal-highlight";
+import { cursorTrackingExtension } from "./cursor-tracking";
 
 /**
  * Holds the theme's CodeMirror extension (chrome + syntax highlighting)
@@ -172,6 +173,7 @@ export function baseExtensions(
         indentationFolding,
         colorChips(),
         revealHighlightExtension(),
+        cursorTrackingExtension(),
         lintGutter(),
         themeCompartment.of(buildCmTheme(initialTheme)),
         ...(filePath
