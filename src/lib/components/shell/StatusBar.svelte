@@ -4,6 +4,8 @@
     import { layout } from "$lib/stores/layout.svelte";
     import { gitStore } from "$lib/stores/git.svelte";
     import { editorStore } from "$lib/stores/editor.svelte";
+    import { problemsStore } from "$lib/stores/problems.svelte";
+    import { lspLanguageIdFor } from "$lib/lsp/languageId";
     import { lspStore } from "$lib/lsp/manager.svelte";
     import LspServerPopover from "./LspServerPopover.svelte";
     import LspOutputPanel from "./LspOutputPanel.svelte";
@@ -63,6 +65,41 @@
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         lspPopoverAnchor = { x: rect.left, y: rect.top };
     }
+
+    // --- VS Code parity chips (Phase 3) ---------------------------------
+    // Cursor position + selection size, fed live by cursorTrackingExtension
+    // through editorStore. Only rendered when a text tab is active — the
+    // chip would be meaningless (and stale) over image/binary/diff tabs.
+    const hasTextTab = $derived(
+        editorStore.activeTab !== undefined && editorStore.activeTab.kind === "text",
+    );
+    const cursorLabel = $derived(
+        `Ln ${editorStore.cursorLine}, Col ${editorStore.cursorColumn}` +
+            (editorStore.selectionLength > 0
+                ? ` (${editorStore.selectionLength} selected)`
+                : ""),
+    );
+    const multiCursorHint = $derived(
+        editorStore.selectionCount > 1
+            ? `${editorStore.selectionCount} cursors · `
+            : "",
+    );
+
+    // Problems chip: hidden entirely at zero (VS Code shows nothing until
+    // there's something to show); red-tinted once any file has an error.
+    const problemTotal = $derived(
+        problemsStore.errorCount + problemsStore.warningCount,
+    );
+
+    // Language chip mirrors what the LSP layer actually recognizes for the
+    // active file — clicking it jumps to the Explorer, matching VS Code's
+    // "change language mode" entry point's discoverability role (a full
+    // per-file override picker is a later phase).
+    const languageLabel = $derived.by(() => {
+        const tab = editorStore.activeTab;
+        if (!tab || tab.kind !== "text") return null;
+        return lspLanguageIdFor(tab.path) ?? "Plain Text";
+    });
 </script>
 
 <footer class="status-bar">
@@ -108,9 +145,42 @@
         {/if}
     </div>
     <div class="segment">
+        {#if problemTotal > 0}
+            <button
+                class="chip problems"
+                class:has-errors={problemsStore.errorCount > 0}
+                title={`${problemsStore.errorCount} error${problemsStore.errorCount === 1 ? "" : "s"}, ${problemsStore.warningCount} warning${problemsStore.warningCount === 1 ? "" : "s"} — click to open Problems, F8 to jump`}
+                onclick={() => layout.showProblems()}
+            >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" class="problem-icon">
+                    <circle cx="8" cy="8" r="6.25" />
+                    <path d="M8 4.75v3.5" stroke-linecap="round" />
+                    <circle cx="8" cy="10.9" r="0.7" fill="currentColor" stroke="none" />
+                </svg>
+                <span>⊗ {problemsStore.errorCount}</span>
+                <span>⚠ {problemsStore.warningCount}</span>
+            </button>
+        {/if}
+        {#if languageLabel}
+            <button
+                class="chip"
+                title="Language mode (detected from file type; drives which LSP server runs)"
+                onclick={() => layout.setActiveView("explorer")}
+            >{languageLabel}</button>
+        {/if}
         {#if !layout.isNarrow}
-            <span class="chip static">UTF-8</span>
-            <span class="chip static">LF</span>
+            <span class="chip static" title="File encoding">UTF-8</span>
+        {/if}
+        {#if hasTextTab && !layout.isNarrow}
+            <span class="chip static" title="Indentation of the current file">{editorStore.indentLabel}</span>
+            <span class="chip static" title="Line ending of the current file">{editorStore.documentEol}</span>
+        {:else if !layout.isNarrow}
+            <span class="chip static" title="Line ending of the current file">{editorStore.documentEol}</span>
+        {/if}
+        {#if hasTextTab}
+            <span class="chip static" title="{multiCursorHint}cursor position">
+                {multiCursorHint}{cursorLabel}
+            </span>
         {/if}
         {#if version}
             <span class="chip static">v{version}</span>

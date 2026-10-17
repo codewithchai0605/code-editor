@@ -17,6 +17,12 @@ import { Decoration, EditorView } from "@codemirror/view";
 
 export const revealHighlight = StateEffect.define<{ from: number; to: number }>();
 
+/** Dispatched (with no value) by callers that want any in-flight flash
+ *  cleared immediately — e.g. clicking the status-bar Problems chip to
+ *  jump between diagnostics back-to-back, where the previous file's flash
+ *  would otherwise linger for its full duration. */
+export const clearRevealHighlight = StateEffect.define<null>();
+
 const FLASH_MS = 1600;
 
 const revealField = StateField.define<{ from: number; to: number } | null>({
@@ -25,6 +31,9 @@ const revealField = StateField.define<{ from: number; to: number } | null>({
         for (const effect of tr.effects) {
             if (effect.is(revealHighlight)) {
                 return effect.value ? { ...effect.value } : null;
+            }
+            if (effect.is(clearRevealHighlight)) {
+                return null;
             }
         }
         return value;

@@ -5,8 +5,11 @@
     import { terminalStore } from "$lib/stores/terminal.svelte";
     import ProblemsPanel from "./ProblemsPanel.svelte";
 
-    /** Which bottom-panel tab is showing — VS Code's TERMINAL/PROBLEMS split. */
-    let activeTab = $state<"terminal" | "problems">("terminal");
+    /** Which bottom-panel tab is showing — VS Code's TERMINAL/PROBLEMS split.
+     *  Lives on the layout store rather than as component state because the
+     *  status bar's Problems chip (Phase 3) needs to switch it from outside
+     *  this component. */
+    let activeTab = $derived(layout.panelTab);
 
     // xterm.js is a substantial library that most sessions may never need
     // (the panel starts closed) — deferring the import until the panel is
@@ -52,14 +55,14 @@
                 class:active={activeTab === "problems"}
                 role="tab"
                 aria-selected={activeTab === "problems"}
-                onclick={() => (activeTab = "problems")}
+                onclick={() => (layout.panelTab = "problems")}
             >PROBLEMS</button>
             <button
                 class="view-tab"
                 class:active={activeTab === "terminal"}
                 role="tab"
                 aria-selected={activeTab === "terminal"}
-                onclick={() => (activeTab = "terminal")}
+                onclick={() => (layout.panelTab = "terminal")}
             >TERMINAL</button>
         </div>
         <div class="tabs" role="tablist" aria-label="Terminal sessions">
