@@ -169,19 +169,19 @@ class EditorStore {
         // Text.iterLines visits every line break; "\n"-terminated slices
         // that end with \r had CRLF line breaks.
         if (sampleIndent) {
-            doc.iter((line) => {
-                const s = line.text.slice(0, Math.min(line.text.length, 20));
+            const iter = doc.iter();
+            for (;;) {
+                const part = iter.next();
+                if (part.done) break;
+                const s = part.value.slice(0, Math.min(part.value.length, 20));
                 if (/^ *\t/.test(s)) tabs++;
                 else if (/^\s/.test(s)) spaces++;
-                return true;
-            });
+            }
             crlf = 0;
-            let pos = 0;
             for (let n = 1; n < doc.lines; n++) {
                 const l = doc.line(n);
                 if (l.text.endsWith("\r")) crlf++;
             }
-            void pos;
         } else {
             // Only count line endings via the (O(lines), no text copy)
             // line-break iteration when skipping the indent pass.
