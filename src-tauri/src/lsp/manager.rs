@@ -64,13 +64,28 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{oneshot, watch, Mutex as AsyncMutex};
 use tokio::task::JoinSet;
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// Timeout for *interactive* requests (hover, completion, definition, …).
+/// Deliberately short: these are fired on user intent (mouse hover, F12),
+/// and a server that hasn't answered in 8s isn't going to answer in time
+/// to be useful — failing fast lets the frontend show its "no results"
+/// path (and, for hover, recover into the working fallback) instead of
+/// the UI appearing frozen behind a hung request.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
+/// Longer budget for `initialize` specifically. TypeScript 7's native
+/// server (`tsgo`/`tsc --lsp`) is a Go process that boots a full compiler
+/// service against the project's `tsconfig.json`; cold-starting it (first
+/// type-program build, lib.d.ts loading) routinely takes longer than any
+/// subsequent interactive request will. Killing the handshake at the same
+/// 8s we use for a hover is what made the native variant look like it
+/// "starts but never works": initialize timed out before tsserver finished
+/// warming up, so no request ever reached a `Running` server.
+const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long `stop()` will wait for an in-flight `initialize` to settle
 /// (into `Running` or `Crashed`) before giving up and sending `shutdown`
 /// anyway — bounded slightly above `REQUEST_TIMEOUT` so this is normally
 /// resolved by `initialize` finishing (or timing out) on its own, not by
 /// this timeout firing first.
-const INITIALIZE_GRACE: Duration = Duration::from_secs(20);
+const INITIALIZE_GRACE: Duration = Duration::from_secs(65);
 /// How long `stop()` waits for a `shutdown` response before giving up and
 /// sending `exit` anyway — a server that doesn't answer `shutdown`
 /// shouldn't be able to block the user from stopping it.
@@ -373,9 +388,84 @@ pub enum ServerStatus {
     Stopped,
 }
 
-/// One in-flight JSON-RPC request awaiting its response.
-struct PendingRequest {
-    sender: oneshot::Sender<Result<Value, Value>>,
+/// One in-flight JSON-RPC request awaiting its response, plus everything
+/// needed to keep that response useful even after the original caller has
+/// timed out:
+/// - `tx` resolves the *first* awaiting caller (the normal path).
+/// - `waiters`: newer identical requests (same `RequestKey`) that arrived
+///   while the server was still working on ours. Rather than spamming the
+///   server with duplicate work, they wait on this list and get the same
+///   response when it lands — whenever that is.
+/// - `parked`: if the answer arrives when nobody at all is waiting (every
+///   caller already timed out), it's stored here for the next identical
+///   request to consume immediately (`take_parked`), instead of being
+///   dropped on the floor like before — which is what turned a slow-but-
+///   functional TypeScript 7 native server into permanently-timing-out
+///   hovers/definitions: each attempt threw away the previous attempt's
+///   eventual answer.
+struct PendingEntry {
+    tx: oneshot::Sender<Result<Value, Value>>,
+    id: i64,
+    waiters: Vec<oneshot::Sender<Result<Value, Value>>>,
+    parked: Option<ParkedResponse>,
+}
+
+#[derive(Clone)]
+struct ParkedResponse {
+    result: Result<Value, Value>,
+    at: std::time::Instant,
+}
+
+/// How long a late response stays parked for a future identical request.
+/// Past this the result is likely stale relative to the document state
+/// (tsserver answers reflect the file as it was when the request was
+/// made), so a fresh request goes to the server instead.
+const PARKED_RESPONSE_TTL: Duration = Duration::from_secs(30);
+
+impl PendingEntry {
+    /// Resolves every waiter for this entry (the original `tx` plus any
+    /// coalesced duplicates) with `result`. Send errors are ignored —
+    /// a closed receiver just means that caller gave up/timed out.
+    fn deliver(&mut self, result: Result<Value, Value>) {
+        let _ = self.tx.send(result.clone());
+        for waiter in self.waiters.drain(..) {
+            let _ = waiter.send(result.clone());
+        }
+    }
+
+    fn register_waiter(&mut self) -> oneshot::Receiver<Result<Value, Value>> {
+        let (tx, rx) = oneshot::channel();
+        self.waiters.push(tx);
+        rx
+    }
+
+    fn take_parked(&mut self) -> Option<Result<Value, Value>> {
+        let parked = self.parked.take()?;
+        if parked.at.elapsed() > PARKED_RESPONSE_TTL {
+            return None;
+        }
+        Some(parked.result)
+    }
+}
+
+/// Identity of a request for deduplication/mailbox purposes: the method
+/// plus a hash of its serialized params — two hover requests differ by
+/// position, two didChange-backed repeats of the same hover don't. Hashing
+/// (rather than storing raw params) keeps the map cheap; collisions only
+/// ever cost a wasted mailbox slot, never a wrong response, because a
+/// parked/waiter delivery is consumed strictly under this same key.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct RequestKey(u64);
+
+fn request_key(method: &str, params: &Value) -> RequestKey {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    method.hash(&mut hasher);
+    // `serde_json::Value`'s Display form is deterministic for a given
+    // tree (object keys print in insertion order, which is stable for
+    // values we built ourselves from `lsp_types` structs via serde).
+    params.to_string().hash(&mut hasher);
+    RequestKey(hasher.finish())
 }
 
 /// The current text of one file the editor has open under a given
@@ -389,7 +479,15 @@ struct OpenDoc {
 pub struct LspServerInstance {
     stdin: AsyncMutex<ChildStdin>,
     child: AsyncMutex<Child>,
-    pending: StdMutex<HashMap<i64, PendingRequest>>,
+    /// In-flight/parked requests, keyed by `RequestKey` (method + params)
+    /// so identical repeats coalesce and late answers stay reachable —
+    /// see `PendingEntry`.
+    pending: StdMutex<HashMap<RequestKey, PendingEntry>>,
+    /// Response-id -> request key, so `route_message` can find the entry
+    /// an incoming response belongs to even after its original caller has
+    /// timed out (the id lives here until the answer is routed or the
+    /// instance dies).
+    id_to_key: StdMutex<HashMap<i64, RequestKey>>,
     next_id: AtomicI64,
     /// Single source of truth for this instance's current status —
     /// updated via `set_status`, read by `list_servers` and by `get`'s
@@ -415,45 +513,157 @@ pub struct LspServerInstance {
 }
 
 impl LspServerInstance {
+    /// The current status, for callers that just want to peek at it.
+    fn status(&self) -> ServerStatus {
+        self.status.borrow().clone()
+    }
+
+    /// True once `initialize` has been answered successfully — feature
+    /// requests are gated on this (see `request_with_warmup`).
+    fn is_running(&self) -> bool {
+        matches!(*self.status.borrow(), ServerStatus::Running)
+    }
+
+    /// Whether the handshake has already failed/been abandoned, so a
+    /// late-arriving request should fail fast rather than queue forever.
+    fn is_dead(&self) -> bool {
+        matches!(
+            *self.status.borrow(),
+            ServerStatus::Crashed { .. } | ServerStatus::Stopped
+        )
+    }
+
     async fn write_raw(&self, body: &str) -> std::io::Result<()> {
         let mut stdin = self.stdin.lock().await;
         write_message(&mut *stdin, body).await
     }
 
     /// Sends a JSON-RPC request and awaits its response, subject to
-    /// `REQUEST_TIMEOUT`. On timeout the pending entry is cleaned up so a
-    /// slow/hung server can't leak entries indefinitely.
+    /// `REQUEST_TIMEOUT` (`INITIALIZE_TIMEOUT` for `initialize` itself —
+    /// see those constants' doc comments). Two performance behaviors the
+    /// old fire-each-request-independently version didn't have:
+    /// - **Coalescing**: an identical request (same method + params) that
+    ///   arrives while one is already in flight doesn't redo the server's
+    ///   work — it waits on the existing entry's response instead. This
+    ///   matters most for hover: moving the mouse across one token fires a
+    ///   new request per position CodeMirror reports, and tsserver answers
+    ///   them all with the same payload.
+    /// - **Late responses aren't thrown away**: after our own timeout
+    ///   fires, the entry stays registered so the server's eventual answer
+    ///   either wakes still-waiting duplicates or gets parked for the next
+    ///   identical request (`PendingEntry`'s doc comment). A slow-but-
+    ///   working TypeScript 7 native server therefore converges — second
+    ///   hover on a token is instant — instead of every attempt timing out
+    ///   forever.
     async fn request(&self, method: &str, params: Value) -> Result<Value, String> {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let (tx, rx) = oneshot::channel();
-        self.pending
-            .lock()
-            .unwrap()
-            .insert(id, PendingRequest { sender: tx });
+        let key = request_key(method, &params);
 
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        })
-        .to_string();
-
-        if let Err(e) = self.write_raw(&body).await {
-            self.pending.lock().unwrap().remove(&id);
-            return Err(e.to_string());
+        enum Action {
+            SendNow { id: i64, rx: oneshot::Receiver<Result<Value, Value>> },
+            AwaitExisting(oneshot::Receiver<Result<Value, Value>>),
+            Immediate(Result<Value, Value>),
         }
 
-        match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
+        let action = {
+            let mut pending = self.pending.lock().unwrap();
+            // Cap mailbox growth from pathological unique-key spam (e.g. a
+            // hover fired at every pixel of a mouse move): only coalesce/
+            // park when the working set is reasonable.
+            if pending.len() >= MAX_PENDING_ENTRIES {
+                pending.retain(|_, entry| !entry.tx.is_closed());
+            }
+            match pending.entry(key.clone()) {
+                std::collections::hash_map::Entry::Occupied(mut occ) => {
+                    let entry = occ.get_mut();
+                    if let Some(parked) = entry.take_parked() {
+                        Action::Immediate(parked)
+                    } else if entry.tx.is_closed() && entry.waiters.iter().all(|w| w.is_closed()) {
+                        // The original request timed out and nothing has
+                        // consumed its parked answer yet; nobody is
+                        // waiting on its id anymore. Re-issue under this
+                        // same entry so a late answer to the *old* id (if
+                        // it arrives between now and then) still routes
+                        // here via `id_to_key`.
+                        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+                        let (tx, rx) = oneshot::channel();
+                        entry.tx = tx;
+                        entry.id = id;
+                        Action::SendNow { id, rx }
+                    } else {
+                        Action::AwaitExisting(entry.register_waiter())
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(vac) => {
+                    let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+                    let (tx, rx) = oneshot::channel();
+                    vac.insert(PendingEntry {
+                        tx,
+                        id,
+                        waiters: Vec::new(),
+                        parked: None,
+                    });
+                    self.id_to_key.lock().unwrap().insert(id, key.clone());
+                    Action::SendNow { id, rx }
+                }
+            }
+        };
+
+        let rx = match action {
+            Action::Immediate(Ok(result)) => return Ok(result),
+            Action::Immediate(Err(error)) => return Err(error.to_string()),
+            Action::AwaitExisting(rx) => rx,
+            Action::SendNow { id, rx } => {
+                let body = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "method": method,
+                    "params": params,
+                })
+                .to_string();
+                if let Err(e) = self.write_raw(&body).await {
+                    self.forget_request(&key, id);
+                    return Err(e.to_string());
+                }
+                rx
+            }
+        };
+
+        let timeout = if method == "initialize" {
+            INITIALIZE_TIMEOUT
+        } else {
+            REQUEST_TIMEOUT
+        };
+
+        match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(Ok(result))) => Ok(result),
-            Ok(Ok(Err(error))) => Err(error.to_string()),
+            Ok(Ok(Err(error))) => {
+                // A real error response settles the exchange — no reason
+                // to keep the entry around for repeats of a known failure.
+                self.forget_request(&key, 0);
+                Err(error.to_string())
+            }
             Ok(Err(_)) => Err("LSP request cancelled (server disconnected)".to_string()),
             Err(_) => {
-                self.pending.lock().unwrap().remove(&id);
-                Err(format!(
-                    "LSP request '{method}' timed out after {REQUEST_TIMEOUT:?}"
-                ))
+                // Intentionally do NOT remove the pending entry here: the
+                // server may still answer, and `route_message` will park
+                // that answer for the next identical request. Entries are
+                // pruned by the bounded-mailbox cleanup above and cleared
+                // wholesale when the instance dies.
+                Err(format!("LSP request '{method}' timed out after {timeout:?}"))
             }
+        }
+    }
+
+    /// Drops a settled request's registration. `id` of 0 means "remove
+    /// whatever is under this key" (used after an error response, where
+    /// even the in-flight entry is moot).
+    fn forget_request(&self, key: &RequestKey, id: i64) {
+        let removed = self.pending.lock().unwrap().remove(key);
+        if let Some(entry) = removed {
+            self.id_to_key.lock().unwrap().remove(&entry.id);
+        }
+        if id != 0 {
+            self.id_to_key.lock().unwrap().remove(&id);
         }
     }
 
